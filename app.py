@@ -9,17 +9,8 @@ import io
 # Page config
 st.set_page_config(page_title="AI PDF Recommendation Extractor", layout="wide")
 
-# Header + Logo
-col1, col2 = st.columns([1, 5])
-
-with col1:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Atkins_logo.svg/2560px-Atkins_logo.svg.png",
-        width=100,
-    )
-
-with col2:
-    st.title("AI PDF Recommendation Extractor")
+# Simple Header (no logo)
+st.title("AI PDF Recommendation Extractor")
 
 st.divider()
 
