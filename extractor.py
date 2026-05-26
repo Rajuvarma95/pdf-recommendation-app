@@ -28,22 +28,44 @@ def detect_sections(lines):
     return sections
 
 
-# ✅ Extract selected section
+
 def extract_section(lines, start_index):
     content = []
 
     for i in range(start_index, len(lines)):
         line = lines[i]
+        line_lower = line.lower()
 
         if i > start_index:
+
+            # ✅ Stop at next numbered section
             if re.match(r"^\d+\.\s+", line):
                 break
-            if "appendix" in line.lower():
+
+            # ✅ Stop at Appendix section
+            if line_lower.startswith("appendix"):
+                break
+
+            # ✅ Stop at A., B., C. headings (appendix style)
+            if re.match(r"^[A-Z]\.", line):
+                break
+
+            # ✅ Stop at figures / drawings
+            if "figure" in line_lower:
+                break
+
+            # ✅ Stop at typical footer/report header patterns
+            if "inspection report" in line_lower:
+                break
+
+            # ✅ Stop if line is too short or looks like label
+            if len(line.split()) < 3 and line.isupper():
                 break
 
         content.append(line)
 
     return format_output(content)
+
 
 
 # ✅ Format output nicely
