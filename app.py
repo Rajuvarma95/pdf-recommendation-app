@@ -6,30 +6,33 @@ import tempfile
 import zipfile
 import io
 
-# ✅ Page config
+# Page config
 st.set_page_config(page_title="AI PDF Recommendation Extractor", layout="wide")
 
-# ✅ LOGO + HEADER
-col1, col2 = st.columns([1, 6])
+# Header + Logo
+col1, col2 = st.columns([1, 5])
 
 with col1:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Atkins_logo.svg/2560px-Atkins_logo.svg.png", width=120)
+    st.image(
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Atkins_logo.svg/2560px-Atkins_logo.svg.png",
+        width=100,
+    )
 
 with col2:
     st.title("AI PDF Recommendation Extractor")
 
-st.markdown("---")
+st.divider()
 
-st.write("📂 Upload one or more PDF files to extract recommendation sections and preview them before download.")
+st.write("Upload PDF files to extract recommendation sections and preview them before downloading.")
 
-# ✅ Upload PDFs
+# Upload
 uploaded_files = st.file_uploader(
     "Upload PDF files",
     type=["pdf"],
     accept_multiple_files=True
 )
 
-# ✅ Extract lines
+# Extract text lines
 def extract_lines(uploaded_file):
     reader = PdfReader(uploaded_file)
     lines = []
@@ -45,15 +48,14 @@ def extract_lines(uploaded_file):
     return lines
 
 
-# ✅ Detect recommendation/conclusion section
+# Extract recommendation section
 def find_recommendation_section(lines):
 
     candidates = []
 
     for i, line in enumerate(lines):
         if re.match(r"^\d+\.\s+", line):
-            if ("recommend" in line.lower() or
-                "conclusion" in line.lower()):
+            if "recommend" in line.lower() or "conclusion" in line.lower():
 
                 score = 0
 
@@ -71,12 +73,11 @@ def find_recommendation_section(lines):
                 candidates.append((i, score))
 
     if not candidates:
-        return "❌ No recommendation section found"
+        return "No recommendation section found"
 
     start_index = max(candidates, key=lambda x: x[1])[0]
 
     section_lines = lines[start_index:start_index + 300]
-
     clean_lines = []
 
     for line in section_lines:
@@ -94,7 +95,7 @@ def find_recommendation_section(lines):
     return format_output(clean_lines)
 
 
-# ✅ Format output
+# Format output
 def format_output(lines):
     output = ""
     paragraph = ""
@@ -114,14 +115,14 @@ def format_output(lines):
     return output.strip()
 
 
-# ✅ MAIN PROCESS
+# Processing
 if uploaded_files:
 
-    if st.button("🚀 Process PDFs"):
+    if st.button("🚀 Extract Recommendations"):
 
         zip_buffer = io.BytesIO()
 
-        st.subheader("📊 Preview of Extracted Recommendations")
+        st.subheader("📄 Preview")
 
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
@@ -130,11 +131,11 @@ if uploaded_files:
                 lines = extract_lines(file)
                 content = find_recommendation_section(lines)
 
-                # ✅ Preview (nice formatting)
-                st.markdown(f"### 📄 {file.name}")
+                # Preview
+                st.markdown(f"### {file.name}")
                 st.text_area("Extracted Content", content, height=200)
 
-                # ✅ Create Word doc
+                # Word file
                 doc = Document()
                 doc.add_heading(f"Recommendations - {file.name}", level=1)
                 doc.add_paragraph(content)
@@ -144,12 +145,11 @@ if uploaded_files:
 
                 zipf.write(temp.name, file.name.replace(".pdf", "_recommendations.docx"))
 
-        st.success("✅ Processing Complete!")
+        st.success("✅ Done")
 
         st.download_button(
-            label="⬇ Download ALL Word files (ZIP)",
-            data=zip_buffer.getvalue(),
-            file_name="all_recommendations.zip",
+            "⬇ Download All Files",
+            zip_buffer.getvalue(),
+            file_name="recommendations.zip",
             mime="application/zip"
         )
-``
