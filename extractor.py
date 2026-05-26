@@ -17,72 +17,19 @@ def extract_lines(file):
     return lines
 
 
-# ✅ Detect section headings
+# ✅ Detect ONLY main sections (NO TOC, NO appendix, NO sub-sections)
 def detect_sections(lines):
     sections = []
 
     for i, line in enumerate(lines):
-        if re.match(r"^\d+\.\s+", line):
-            sections.append((line, i))
+        clean_line = line.strip()
 
-    return sections
+        # ✅ Match main sections like "1. SYNOPSIS"
+        if re.match(r"^\d+\.\s+[A-Za-z]", clean_line):
 
+            lower_line = clean_line.lower()
 
+            # ❌ Skip TOC lines (end with page numbers)
+            if re.search(r"\d+$", clean_line):
+                continue
 
-def extract_section(lines, start_index):
-    content = []
-
-    for i in range(start_index, len(lines)):
-        line = lines[i]
-        line_lower = line.lower()
-
-        if i > start_index:
-
-            # ✅ Stop at next numbered section
-            if re.match(r"^\d+\.\s+", line):
-                break
-
-            # ✅ Stop at Appendix section
-            if line_lower.startswith("appendix"):
-                break
-
-            # ✅ Stop at A., B., C. headings (appendix style)
-            if re.match(r"^[A-Z]\.", line):
-                break
-
-            # ✅ Stop at figures / drawings
-            if "figure" in line_lower:
-                break
-
-            # ✅ Stop at typical footer/report header patterns
-            if "inspection report" in line_lower:
-                break
-
-            # ✅ Stop if line is too short or looks like label
-            if len(line.split()) < 3 and line.isupper():
-                break
-
-        content.append(line)
-
-    return format_output(content)
-
-
-
-# ✅ Format output nicely
-def format_output(lines):
-    output = ""
-    paragraph = ""
-
-    for line in lines:
-        if len(line.split()) <= 3:
-            if paragraph:
-                output += paragraph.strip() + "\n\n"
-                paragraph = ""
-            output += line + "\n"
-        else:
-            paragraph += line + " "
-
-    if paragraph:
-        output += paragraph.strip()
-
-    return output.strip()
