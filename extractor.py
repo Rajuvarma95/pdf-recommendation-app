@@ -54,35 +54,41 @@ def detect_sections(lines):
 
 
 # ✅ Extract section content
-def extract_section(lines, start_index):
+
+def extract_section(lines, title):
     content = []
+    found = False
 
-    for i in range(start_index, len(lines)):
-        line = lines[i]
-        line_lower = line.lower()
+    for i, line in enumerate(lines):
+        clean = line.strip()
 
-        if i > start_index:
+        # ✅ Find actual section in document (not TOC)
+        if not found:
+            if title.lower() in clean.lower():
+                # avoid matching TOC line containing dots
+                if "..." not in clean:
+                    found = True
+                    start_index = i
+                    content.append(clean)
+            continue
 
-            # ✅ Stop at next section
-            if re.match(r'^\d+\.\s+', line):
+        # ✅ Once found → collect content
+        if found:
+            lower = clean.lower()
+
+            # ✅ Stop at next main section
+            if re.match(r'^\d+\.\s+', clean):
                 break
 
             # ✅ Stop appendix
-            if "appendix" in line_lower:
+            if "appendix" in lower:
                 break
 
-            if re.match(r'^[A-Z]\.', line):
+            # ✅ Stop figure/table noise
+            if "figure" in lower:
                 break
 
-            # ✅ Stop figures
-            if "figure" in line_lower:
-                break
-
-            # ✅ Stop noise
-            if len(line.split()) < 3 and line.isupper():
-                break
-
-        content.append(line)
+            content.append(clean)
 
     return format_output(content)
 
