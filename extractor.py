@@ -2,52 +2,58 @@ import re
 from pypdf import PdfReader
 
 
+# ✅ Extract all lines from PDF
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
 
     for page in reader.pages:
         text = page.extract_text()
+
         if text:
             for line in text.split("\n"):
-                line = line.strip()
-                if line:
-                    lines.append(line)
+                clean = line.strip()
+                if clean:
+                    lines.append(clean)
 
     return lines
 
 
+# ✅ Detect sections ONLY from TOC
 def detect_sections(lines):
     sections = []
+    in_toc = False
 
     for i, line in enumerate(lines):
-        clean_line = line.strip()
+        clean = line.strip()
+        lower = clean.lower()
 
-        if re.match(r'^\d+\.\s+[A-Za-z]', clean_line):
+        # ✅ Start TOC
+        if "table of contents" in lower:
+            in_toc = True
+            continue
 
-            lower_line = clean_line.lower()
+        # ✅ Stop at appendix
+        if in_toc and "appendices" in lower:
+            break
 
-            # skip TOC lines ending with numbers
-            if re.search(r'\d+$', clean_line):
-                continue
+        if in_toc:
+            # ✅ Match main sections like "1. TITLE"
+            if re.match(r'^\d+\.\s+[A-Za-z]', clean):
 
-            # skip sub-sections like 1.1
-            if re.match(r'^\d+\.\d+', clean_line):
-                continue
+                # ❌ Skip sub-sections like 1.1
+                if re.match(r'^\d+\.\d+', clean):
+                    continue
 
-            # skip appendix
-            if "appendix" in lower_line:
-                continue
+                # ✅ Remove dotted page numbers
+                clean = re.sub(r'\.+\s*\d+$', '', clean)
 
-            # skip A., B., C.
-            if re.match(r'^[A-Z]\.', clean_line):
-                continue
-
-            sections.append((clean_line, i))
+                sections.append((clean, i))
 
     return sections
 
 
+# ✅ Extract section content
 def extract_section(lines, start_index):
     content = []
 
@@ -57,21 +63,22 @@ def extract_section(lines, start_index):
 
         if i > start_index:
 
+            # ✅ Stop at next section
             if re.match(r'^\d+\.\s+', line):
                 break
 
-            if line_lower.startswith("appendix"):
+            # ✅ Stop appendix
+            if "appendix" in line_lower:
                 break
 
             if re.match(r'^[A-Z]\.', line):
                 break
 
+            # ✅ Stop figures
             if "figure" in line_lower:
                 break
 
-            if "inspection report" in line_lower:
-                break
-
+            # ✅ Stop noise
             if len(line.split()) < 3 and line.isupper():
                 break
 
@@ -80,6 +87,7 @@ def extract_section(lines, start_index):
     return format_output(content)
 
 
+# ✅ Format text
 def format_output(lines):
     output = ""
     paragraph = ""

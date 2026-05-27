@@ -4,33 +4,42 @@ import tempfile
 import zipfile
 import io
 
-# ✅ Import logic from extractor file
 from extractor import extract_lines, detect_sections, extract_section
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
 st.title("AI PDF Content Extractor")
-
 st.divider()
 
-st.write("📂 Upload a PDF, select sections, preview content, and download results.")
+st.write("📂 Upload a PDF → select sections → preview → download.")
 
-# ✅ Upload PDF
 uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
 if uploaded_file:
 
-    lines = extract_lines(uploaded_file)
+    with st.spinner("⏳ Reading PDF..."):
+        lines = extract_lines(uploaded_file)
+
     sections = detect_sections(lines)
 
-    if sections:
+    # ✅ Remove duplicate sections
+    seen = set()
+    unique_sections = []
+
+    for title, index in sections:
+        if title not in seen:
+            seen.add(title)
+            unique_sections.append((title, index))
+
+    if unique_sections:
 
         st.subheader("📑 Select Sections")
 
         selected_sections = []
 
-        for title, index in sections:
-            if st.checkbox(title):
+        for title, index in unique_sections:
+            # ✅ FIX duplicate checkbox error
+            if st.checkbox(title, key=f"{title}_{index}"):
                 selected_sections.append((title, index))
 
         if st.button("🚀 Extract Selected Sections"):
@@ -46,13 +55,12 @@ if uploaded_file:
 
                     content = extract_section(lines, index)
 
-                    # ✅ Preview
                     st.markdown(f"### {title}")
                     st.text_area("Content", content, height=200)
 
                     combined_text += f"{title}\n\n{content}\n\n"
 
-                # ✅ Create Word file
+                # ✅ create Word file
                 doc = Document()
                 doc.add_heading("Extracted PDF Sections", level=1)
                 doc.add_paragraph(combined_text)
@@ -72,4 +80,4 @@ if uploaded_file:
             )
 
     else:
-        st.warning("⚠ No sections detected in this PDF")
+        st.warning("⚠ No valid sections found (TOC not detected)")
