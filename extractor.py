@@ -2,7 +2,6 @@ import re
 from pypdf import PdfReader
 
 
-# ✅ Extract text lines from PDF
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -19,7 +18,6 @@ def extract_lines(file):
     return lines
 
 
-# ✅ Detect ONLY TOC main sections
 def detect_sections(lines):
     sections = []
     in_toc = False
@@ -37,11 +35,9 @@ def detect_sections(lines):
 
         if in_toc and re.match(r'^\d+\.\s+[A-Za-z]', clean):
 
-            # ❌ skip sub-sections
             if re.match(r'^\d+\.\d+', clean):
                 continue
 
-            # ✅ remove dotted page numbers
             clean = re.sub(r'\.+\s*\d+$', '', clean)
 
             sections.append(clean)
@@ -49,7 +45,6 @@ def detect_sections(lines):
     return sections
 
 
-# ✅ Extract ACTUAL SECTION CONTENT (NOT TOC)
 def extract_section(lines, title):
     content = []
     found = False
@@ -57,21 +52,16 @@ def extract_section(lines, title):
     for line in lines:
         clean = line.strip()
 
-        # ✅ find actual section (skip TOC)
         if not found:
             if title.lower() in clean.lower() and "..." not in clean:
                 found = True
                 content.append(clean)
             continue
 
-        # ✅ after section found
         lower = clean.lower()
 
-        # ✅ stop at next main section
         if re.match(r'^\d+\.\s+', clean):
             break
-
-        # ✅ stop appendix / noise
         if "appendix" in lower:
             break
         if "figure" in lower:
@@ -82,7 +72,6 @@ def extract_section(lines, title):
     return format_output(content)
 
 
-# ✅ Format nicely
 def format_output(lines):
     output = ""
     paragraph = ""
