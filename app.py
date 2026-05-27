@@ -4,34 +4,36 @@ import tempfile
 import zipfile
 import io
 
-# ✅ Import logic
 from extractor import extract_lines, detect_sections, extract_section
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
 st.title("AI PDF Content Extractor")
-
 st.divider()
 
-st.write("📂 Upload a PDF, select sections, preview content, and download results.")
+st.write("📂 Upload a PDF → select sections → preview → download")
 
-# ✅ Upload
 uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
 if uploaded_file:
 
-    lines = extract_lines(uploaded_file)
+    with st.spinner("⏳ Reading PDF..."):
+        lines = extract_lines(uploaded_file)
+
     sections = detect_sections(lines)
 
-    if sections:
+    # ✅ remove duplicates
+    unique_sections = list(dict.fromkeys(sections))
+
+    if unique_sections:
 
         st.subheader("📑 Select Sections")
 
         selected_sections = []
 
-        for title, index in sections:
-            if st.checkbox(title):
-                selected_sections.append((title, index))
+        for idx, title in enumerate(unique_sections):
+            if st.checkbox(title, key=f"{title}_{idx}"):
+                selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):
 
@@ -42,7 +44,7 @@ if uploaded_file:
 
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
-                for title, index in selected_sections:
+                for title in selected_sections:
 
                     content = extract_section(lines, title)
 
@@ -51,6 +53,7 @@ if uploaded_file:
 
                     combined_text += f"{title}\n\n{content}\n\n"
 
+                # ✅ Create Word file
                 doc = Document()
                 doc.add_heading("Extracted PDF Sections", level=1)
                 doc.add_paragraph(combined_text)
@@ -70,4 +73,4 @@ if uploaded_file:
             )
 
     else:
-        st.warning("⚠ No sections detected in this PDF")
+        st.warning("⚠ Table of Contents not detected")
