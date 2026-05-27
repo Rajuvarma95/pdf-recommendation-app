@@ -2,6 +2,7 @@ import re
 from pypdf import PdfReader
 
 
+# ✅ Extract text lines
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -18,74 +19,99 @@ def extract_lines(file):
     return lines
 
 
+# ✅ Detect TOC sections
 def detect_sections(lines):
     sections = []
     in_toc = False
 
     for line in lines:
-        clean = line.strip()
-        lower = clean.lower()
+        clean = line.strip().lower()
 
-        if "table of contents" in lower:
+        if "table of contents" in clean:
             in_toc = True
             continue
 
-        if in_toc and "appendices" in lower:
+        if in_toc and "appendices" in clean:
             break
 
-        if in_toc and re.match(r'^\d+\.\s+[A-Za-z]', clean):
+        if in_toc:
+            if re.match(r'^\d+\.\s+[A-Za-z]', line.strip()):
 
-            if re.match(r'^\d+\.\d+', clean):
-                continue
+                # skip sub-sections
+                if re.match(r'^\d+\.\d+', line.strip()):
+                    continue
 
-            clean = re.sub(r'\.+\s*\d+$', '', clean)
+                # remove dotted page numbers
+                clean_line = re.sub(r'\.+\s*\d+$', '', line.strip())
 
-            sections.append(clean)
+                sections.append(clean_line)
 
     return sections
 
 
+# ✅ Normalize text for matching
 def normalize(text):
     return re.sub(r'[^a-z0-9]', '', text.lower())
 
 
+# ✅ Extract section content (IMPROVED LOGIC)
 def extract_section(lines, title):
     content = []
     found = False
 
-    # ✅ normalize title
     norm_title = normalize(title)
 
-    for line in lines:
+    for i, line in enumerate(lines):
         clean = line.strip()
         norm_line = normalize(clean)
 
-        # ✅ find actual section
+        # ✅ find section start (skip TOC)
         if not found:
-            if norm_title in norm_line:
-                # skip TOC dotted lines
-                if "..." not in clean:
-                    found = True
-                    content.append(clean)
+            if norm_title in norm_line and "..." not in clean:
+                found = True
+                content.append(clean)
             continue
 
         lower = clean.lower()
 
-        # ✅ stop at next section
-        if re.match(r'^\d+\.\s+', clean):
+        # ✅ stop at next main section (but allow sub-sections)
+        if re.match(r'^\d+\.\s+[A-Za-z]', clean):
             break
 
-        # ✅ stop noise
-        if "appendix" in lower:
-            break
-        if "figure" in lower:
-            break
+        # ✅ KEEP sub-sections like 8.1, 8.2 ✅
+        if re.match(r'^\d+\.\d+', clean):
+            content.append(clean)
+            continue
 
+        # ✅ KEEP bullet points ✅
+        if re.match(r'^\d+\.', clean):
+            content.append(clean)
+            continue
+
+        # ❌ REMOVE TABLE / GRID DATA
+        if any(word in lower for word in [
+            "asset details", "policy on a page", "owner", "territory",
+            "railway", "data availability", "status", "reports"
+        ]):
+            continue
+
+        # ❌ REMOVE FOOTER / HEADER
+        if any(word in lower for word in [
+            "assessment report", "final", "february", "page", "wkl"
+        ]):
+            continue
+
+        # ❌ REMOVE PURE CAPITAL SHORT NOISE
+        if len(clean.split()) < 3 and clean.isupper():
+            continue
+
+        # ✅ append valid text
         content.append(clean)
 
     return format_output(content)
 
 
+# ✅ Clean formatting
 def format_output(lines):
     output = ""
     paragraph = ""
