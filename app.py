@@ -36,6 +36,9 @@ if uploaded_file:
             if st.checkbox(title, key=f"{title}_{i}"):
                 selected_sections.append(title)
 
+	for title in selected_sections:
+   		content = extract_section(lines, title)
+
         if st.button("🚀 Extract Selected Sections"):
 
             zip_buffer = io.BytesIO()
