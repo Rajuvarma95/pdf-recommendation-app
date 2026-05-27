@@ -11,13 +11,13 @@ st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 st.title("AI PDF Content Extractor")
 st.divider()
 
-st.write("📂 Upload a PDF → select sections → preview → download.")
+st.write("📂 Upload PDF → select sections → preview → download.")
 
 uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
 if uploaded_file:
 
-    with st.spinner("⏳ Reading PDF..."):
+    with st.spinner("⏳ Processing PDF..."):
         lines = extract_lines(uploaded_file)
 
     sections = detect_sections(lines)
@@ -32,7 +32,8 @@ if uploaded_file:
         selected_sections = []
 
         for i, title in enumerate(unique_sections):
-            if st.checkbox(title, key=f"{title}_{i}"):   # ✅ no duplicate error
+            # ✅ FIX: unique key
+            if st.checkbox(title, key=f"{title}_{i}"):
                 selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):
@@ -73,4 +74,4 @@ if uploaded_file:
             )
 
     else:
-        st.warning("⚠ Table of Contents not detected")
+        st.warning("⚠ Table of Contents not detected in this PDF")
