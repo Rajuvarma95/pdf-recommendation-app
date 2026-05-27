@@ -11,7 +11,7 @@ st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 st.title("AI PDF Content Extractor")
 st.divider()
 
-st.write("📂 Upload a PDF → select sections → preview → download")
+st.write("📂 Upload a PDF → select sections → preview → download.")
 
 uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
@@ -31,8 +31,8 @@ if uploaded_file:
 
         selected_sections = []
 
-        for idx, title in enumerate(unique_sections):
-            if st.checkbox(title, key=f"{title}_{idx}"):
+        for i, title in enumerate(unique_sections):
+            if st.checkbox(title, key=f"{title}_{i}"):   # ✅ no duplicate error
                 selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):

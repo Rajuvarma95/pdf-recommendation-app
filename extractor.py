@@ -2,7 +2,7 @@ import re
 from pypdf import PdfReader
 
 
-# ✅ Extract full text lines from PDF
+# ✅ Extract text lines
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -19,7 +19,7 @@ def extract_lines(file):
     return lines
 
 
-# ✅ Detect MAIN sections from TOC ONLY
+# ✅ Detect only TOC sections (main sections only)
 def detect_sections(lines):
     sections = []
     in_toc = False
@@ -28,21 +28,23 @@ def detect_sections(lines):
         clean = line.strip()
         lower = clean.lower()
 
+        # ✅ start TOC
         if "table of contents" in lower:
             in_toc = True
             continue
 
+        # ✅ stop TOC
         if in_toc and "appendices" in lower:
             break
 
         if in_toc:
             if re.match(r'^\d+\.\s+[A-Za-z]', clean):
 
-                # skip sub-sections
+                # ❌ skip sub-sections
                 if re.match(r'^\d+\.\d+', clean):
                     continue
 
-                # remove dotted lines
+                # ✅ remove dotted page numbers
                 clean = re.sub(r'\.+\s*\d+$', '', clean)
 
                 sections.append(clean)
@@ -50,7 +52,7 @@ def detect_sections(lines):
     return sections
 
 
-# ✅ Extract content by searching actual section (NOT TOC)
+# ✅ Extract REAL section content (NOT TOC)
 def extract_section(lines, title):
     content = []
     found = False
@@ -58,28 +60,27 @@ def extract_section(lines, title):
     for line in lines:
         clean = line.strip()
 
-        # ✅ find actual section start
+        # ✅ find actual section location
         if not found:
             if title.lower() in clean.lower():
-                # skip TOC lines
-                if "..." not in clean:
+                if "..." not in clean:  # skip TOC
                     found = True
                     content.append(clean)
             continue
 
-        # ✅ after finding section
+        # ✅ once found
         if found:
             lower = clean.lower()
 
-            # stop at next main section
+            # ✅ stop at next main section
             if re.match(r'^\d+\.\s+', clean):
                 break
 
-            # stop appendix
+            # ✅ stop appendix
             if "appendix" in lower:
                 break
 
-            # stop figure/table noise
+            # ✅ stop figures/tables
             if "figure" in lower:
                 break
 
@@ -88,7 +89,7 @@ def extract_section(lines, title):
     return format_output(content)
 
 
-# ✅ Format nicely
+# ✅ Format output cleanly
 def format_output(lines):
     output = ""
     paragraph = ""
