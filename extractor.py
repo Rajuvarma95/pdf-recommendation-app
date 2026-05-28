@@ -59,45 +59,50 @@ def is_heading_line(line, title):
 
 def extract_section(lines, title):
     content = []
-    found_candidates = []
+    start_index = None
 
-    # ✅ FIRST: find all possible section matches
+    # ✅ get section number (like 8 from "8. RECOMMENDATIONS")
+    match = re.match(r'^(\d+)', title)
+    if not match:
+        return ""
+
+    section_num = match.group(1)
+
+    # ✅ find last occurrence (skip TOC automatically)
     for i, line in enumerate(lines):
         clean = line.strip()
 
-        if is_heading_line(clean, title):
+        if re.match(rf'^{section_num}[\.\s]', clean):
             if "..." not in clean:  # skip TOC
-                found_candidates.append(i)
+                start_index = i
 
-    # ✅ If no match → return empty safely
-    if not found_candidates:
+    if start_index is None:
         return ""
 
-    # ✅ Take FIRST VALID real content (not TOC)
-    start_index = found_candidates[0]
-
-    # ✅ Extract content
+    # ✅ extract content forward
     for i in range(start_index, len(lines)):
         line = lines[i].strip()
         lower = line.lower()
 
         if i != start_index:
-            # stop at next major section
+            # ✅ stop at next section
             if re.match(r'^\d+\.\s+[A-Za-z]', line):
                 break
 
-        # ✅ CLEAN unwanted stuff
-        if "...." in line:
+        # ❌ remove dotted TOC lines
+        if "..." in line:
             continue
 
+        # ❌ remove table content
         if any(word in lower for word in [
-            "asset details", "policy", "owner",
-            "territory", "railway", "status", "reports"
+            "asset", "policy", "owner", "territory",
+            "railway", "status", "reports"
         ]):
             continue
 
+        # ❌ remove footer
         if any(word in lower for word in [
-            "assessment report", "final", "february", "page"
+            "assessment report", "page", "february", "final"
         ]):
             continue
 
