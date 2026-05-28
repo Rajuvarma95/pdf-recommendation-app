@@ -30,9 +30,9 @@ if uploaded_file:
 
         selected_sections = []
 
-        # ✅ FIXED indentation (spaces only)
         for i, title in enumerate(unique_sections):
-            if st.checkbox(title, key=f"{title}_{i}"):
+            # ✅ FIX duplicate key issue
+            if st.checkbox(title, key=f"checkbox_{i}"):
                 selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):
@@ -44,11 +44,18 @@ if uploaded_file:
 
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
-                for title in selected_sections:
+                for i, title in enumerate(selected_sections):
+
                     content = extract_section(lines, title)
 
                     st.markdown(f"### {title}")
-                    st.text_area("Content", content, height=200)
+                    # ✅ UNIQUE key for each text area
+                    st.text_area(
+                        f"Content {i}",
+                        content,
+                        height=200,
+                        key=f"text_{i}"
+                    )
 
                     combined_text += f"{title}\n\n{content}\n\n"
 
@@ -71,4 +78,4 @@ if uploaded_file:
             )
 
     else:
-        st.warning("⚠ Table of Contents not detected")
+        st.warning("⚠ TOC not detected")

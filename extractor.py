@@ -2,7 +2,6 @@ import re
 from pypdf import PdfReader
 
 
-# ✅ Extract text lines
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -11,14 +10,13 @@ def extract_lines(file):
         text = page.extract_text()
         if text:
             for line in text.split("\n"):
-                clean = line.strip()
-                if clean:
-                    lines.append(clean)
+                line = line.strip()
+                if line:
+                    lines.append(line)
 
     return lines
 
 
-# ✅ Detect sections from TOC
 def detect_sections(lines):
     sections = []
     in_toc = False
@@ -35,112 +33,93 @@ def detect_sections(lines):
 
         if in_toc:
             if re.match(r'^\d+\.\s+[A-Za-z]', line):
-
-                # skip sub-sections
                 if re.match(r'^\d+\.\d+', line):
                     continue
 
                 clean_line = re.sub(r'\.+\s*\d+$', '', line.strip())
-
                 sections.append(clean_line)
 
     return sections
 
 
-# ✅ Check if line is actual section header
-def is_heading_match(title, line):
+def is_heading_line(line, title):
     title_num = re.match(r'^(\d+)', title)
-
     if not title_num:
         return False
 
     num = title_num.group(1)
 
-    # match "8. RECOMMENDATIONS" OR "8 RECOMMENDATIONS"
+    # matches "8." OR "8 "
     if re.match(rf'^{num}[\.\s]', line):
-        if title.split(".", 1)[-1].strip().lower() in line.lower():
+        if title.lower().split('.', 1)[-1].strip() in line.lower():
             return True
 
     return False
 
 
-# ✅ Extract correct section content
 def extract_section(lines, title):
     content = []
-    found = False
+    found_candidates = []
 
+    # ✅ FIRST: find all possible section matches
     for i, line in enumerate(lines):
         clean = line.strip()
-        lower = clean.lower()
 
-        # ✅ find actual section (NOT TOC)
-        if not found:
-            if is_heading_match(title, clean):
+        if is_heading_line(clean, title):
+            if "..." not in clean:  # skip TOC
+                found_candidates.append(i)
 
-                # skip TOC dotted line
-                if "..." in clean:
-                    continue
+    # ✅ If no match → return empty safely
+    if not found_candidates:
+        return ""
 
-                # check next lines (if still TOC)
-                next_lines = " ".join(lines[i+1:i+5])
-                if "..." in next_lines:
-                    continue
+    # ✅ Take FIRST VALID real content (not TOC)
+    start_index = found_candidates[0]
 
-                found = True
-                content.append(clean)
+    # ✅ Extract content
+    for i in range(start_index, len(lines)):
+        line = lines[i].strip()
+        lower = line.lower()
+
+        if i != start_index:
+            # stop at next major section
+            if re.match(r'^\d+\.\s+[A-Za-z]', line):
+                break
+
+        # ✅ CLEAN unwanted stuff
+        if "...." in line:
             continue
 
-        # ✅ stop at next main section
-        if re.match(r'^\d+\.\s+[A-Za-z]', clean):
-            break
-
-        # ✅ keep sub-sections
-        if re.match(r'^\d+\.\d+', clean):
-            content.append(clean)
-            continue
-
-        # ✅ keep bullet points (1., 2., etc.)
-        if re.match(r'^\d+\.\s+', clean):
-            content.append(clean)
-            continue
-
-        # ❌ remove TOC garbage
-        if "...." in clean:
-            continue
-
-        # ❌ remove table-like noise
         if any(word in lower for word in [
             "asset details", "policy", "owner",
             "territory", "railway", "status", "reports"
         ]):
             continue
 
-        # ❌ remove footer
         if any(word in lower for word in [
             "assessment report", "final", "february", "page"
         ]):
             continue
 
-        content.append(clean)
+        content.append(line)
 
     return format_output(content)
 
 
-# ✅ Format output
 def format_output(lines):
-    output = ""
-    paragraph = ""
+    text = ""
+    para = ""
 
     for line in lines:
         if len(line.split()) <= 3:
-            if paragraph:
-                output += paragraph.strip() + "\n\n"
-                paragraph = ""
-            output += line + "\n"
+            if para:
+                text += para.strip() + "\n\n"
+                para = ""
+            text += line + "\n"
         else:
-            paragraph += line + " "
+            para += line + " "
 
-    if paragraph:
-        output += paragraph.strip()
+    if para:
+        text += para.strip()
 
-    return output.strip()
+    return text.strip()
