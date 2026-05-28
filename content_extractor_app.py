@@ -22,7 +22,6 @@ if uploaded_file:
 
     sections = detect_sections(lines)
 
-    # ✅ remove duplicates
     unique_sections = list(dict.fromkeys(sections))
 
     if unique_sections:
@@ -31,14 +30,10 @@ if uploaded_file:
 
         selected_sections = []
 
-        # ✅ CORRECT LOOP (NO index unpacking)
-        
-	for i, title in enumerate(unique_sections):
-  	  if st.checkbox(title, key=f"{title}_{i}"):
-       		 selected_sections.append(title)
-
-	for title in selected_sections:
-  	  content = extract_section(lines, title)
+        # ✅ FIXED indentation (spaces only)
+        for i, title in enumerate(unique_sections):
+            if st.checkbox(title, key=f"{title}_{i}"):
+                selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):
 
@@ -50,7 +45,6 @@ if uploaded_file:
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
                 for title in selected_sections:
-
                     content = extract_section(lines, title)
 
                     st.markdown(f"### {title}")
