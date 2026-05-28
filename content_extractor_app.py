@@ -46,10 +46,10 @@ if uploaded_file:
 
                     st.markdown(f"### {title}")
                     st.text_area(
-                        label=f"Content {i}",
-                        value=content,
+                        f"Content {i}",
+                        content,
                         height=200,
-                        key=f"txt_{i}"
+                        key=f"text_{i}"
                     )
 
                     combined_text += f"{title}\n\n{content}\n\n"
@@ -58,12 +58,12 @@ if uploaded_file:
                 doc.add_heading("Extracted Sections", level=1)
                 doc.add_paragraph(combined_text)
 
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-                doc.save(tmp.name)
+                temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+                doc.save(temp.name)
 
-                zipf.write(tmp.name, "sections.docx")
+                zipf.write(temp.name, "sections.docx")
 
-            st.success("✅ Extraction Completed!")
+            st.success("✅ Done")
 
             st.download_button(
                 "⬇ Download",
@@ -73,4 +73,4 @@ if uploaded_file:
             )
 
     else:
-        st.warning("⚠ Table of Contents not detected")
+        st.warning("⚠ No TOC detected")

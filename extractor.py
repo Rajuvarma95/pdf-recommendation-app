@@ -2,7 +2,6 @@ import re
 from pypdf import PdfReader
 
 
-# ✅ Extract text lines from PDF
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -11,57 +10,51 @@ def extract_lines(file):
         text = page.extract_text()
         if text:
             for line in text.split("\n"):
-                clean = line.strip()
-                if clean:
-                    lines.append(clean)
+                line = line.strip()
+                if line:
+                    lines.append(line)
 
     return lines
 
 
-# ✅ Detect TOC sections
 def detect_sections(lines):
     sections = []
     in_toc = False
 
     for line in lines:
-        lower = line.strip().lower()
+        clean = line.strip().lower()
 
-        if "table of contents" in lower:
+        if "table of contents" in clean:
             in_toc = True
             continue
 
-        if in_toc and "appendices" in lower:
+        if in_toc and "appendices" in clean:
             break
 
         if in_toc:
             if re.match(r'^\d+\.\s+[A-Za-z]', line):
 
-                # skip sub-sections
                 if re.match(r'^\d+\.\d+', line):
                     continue
 
-                clean = re.sub(r'\.+\s*\d+$', '', line.strip())
-                sections.append(clean)
+                clean_line = re.sub(r'\.+\s*\d+$', '', line.strip())
+                sections.append(clean_line)
 
     return sections
 
 
-# ✅ Simple heading match
-def is_heading(title, line):
+# ✅ SIMPLE MATCH FUNCTION (NOT strict)
+def is_match(title, line):
     num_match = re.match(r'^(\d+)', title)
     if not num_match:
         return False
 
     num = num_match.group(1)
 
-    if re.match(rf'^{num}[\.\s]', line):
-        if title.lower().split(".", 1)[-1].strip() in line.lower():
-            return True
-
-    return False
+    return re.match(rf'^{num}[\.\s]', line)
 
 
-# ✅ FINAL SECTION EXTRACTOR (STABLE VERSION)
+# ✅ FINAL EXTRACTION FUNCTION (STABLE)
 def extract_section(lines, title):
 
     content = []
@@ -71,55 +64,46 @@ def extract_section(lines, title):
         clean = line.strip()
         lower = clean.lower()
 
-        # ✅ Find section (skip TOC)
+        # ✅ find section start
         if not found:
-            if is_heading(title, clean):
+            if is_match(title, clean):
 
-                # skip TOC version
+                # ❌ skip TOC dotted entries
                 if "..." in clean:
-                    continue
-
-                # check next lines (avoid TOC)
-                next_block = " ".join(lines[i+1:i+5])
-                if "..." in next_block:
                     continue
 
                 found = True
                 content.append(clean)
                 continue
 
-        # ✅ Once found → extract content
+        # ✅ extract until next section
         if found:
 
-            # ✅ stop at next section
             if re.match(r'^\d+\.\s+[A-Za-z]', clean):
                 break
 
-            # ✅ keep sub-sections
+            # ✅ keep subsections
             if re.match(r'^\d+\.\d+', clean):
                 content.append(clean)
                 continue
 
             # ✅ keep bullet points
-            if re.match(r'^\d+\.\s+', clean):
+            if re.match(r'^\d+\.', clean):
                 content.append(clean)
                 continue
 
-            # ❌ remove dotted TOC garbage
+            # ❌ remove noise
             if "...." in clean:
                 continue
 
-            # ❌ remove table / structured content
             if any(w in lower for w in [
                 "asset", "railway", "owner", "territory",
-                "status", "reports", "policy"
+                "status", "report", "policy"
             ]):
                 continue
 
-            # ❌ remove footer/meta
             if any(w in lower for w in [
-                "version", "contract", "page", "february",
-                "report", "final"
+                "page", "version", "contract", "february"
             ]):
                 continue
 
@@ -132,21 +116,20 @@ def extract_section(lines, title):
     return format_output(content)
 
 
-# ✅ Clean formatting
 def format_output(lines):
-    result = ""
+    output = ""
     paragraph = ""
 
     for line in lines:
         if len(line.split()) <= 3:
             if paragraph:
-                result += paragraph.strip() + "\n\n"
+                output += paragraph.strip() + "\n\n"
                 paragraph = ""
-            result += line + "\n"
+            output += line + "\n"
         else:
             paragraph += line + " "
 
     if paragraph:
-        result += paragraph.strip()
+        output += paragraph.strip()
 
-    return result.strip()
+    return output.strip()
