@@ -2,14 +2,12 @@ import re
 from pypdf import PdfReader
 
 
-# ✅ Extract text lines
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
 
     for page in reader.pages:
         text = page.extract_text()
-
         if text:
             for line in text.split("\n"):
                 clean = line.strip()
@@ -19,99 +17,107 @@ def extract_lines(file):
     return lines
 
 
-# ✅ Detect TOC sections
 def detect_sections(lines):
     sections = []
     in_toc = False
 
     for line in lines:
-        clean = line.strip().lower()
+        clean = line.strip()
+        lower = clean.lower()
 
-        if "table of contents" in clean:
+        if "table of contents" in lower:
             in_toc = True
             continue
 
-        if in_toc and "appendices" in clean:
+        if in_toc and "appendices" in lower:
             break
 
         if in_toc:
-            if re.match(r'^\d+\.\s+[A-Za-z]', line.strip()):
+            if re.match(r'^\d+\.\s+[A-Za-z]', clean):
 
-                # skip sub-sections
-                if re.match(r'^\d+\.\d+', line.strip()):
+                if re.match(r'^\d+\.\d+', clean):
                     continue
 
-                # remove dotted page numbers
-                clean_line = re.sub(r'\.+\s*\d+$', '', line.strip())
+                clean = re.sub(r'\.+\s*\d+$', '', clean)
 
-                sections.append(clean_line)
+                sections.append(clean)
 
     return sections
 
 
-# ✅ Normalize text for matching
-def normalize(text):
-    return re.sub(r'[^a-z0-9]', '', text.lower())
+# ✅ STRICT HEADING MATCH (FIX)
+def is_heading_match(title, line):
+    title_num = re.match(r'^(\d+)\.', title)
+    title_text = title.split('.', 1)[-1].strip().lower()
+
+    if title_num:
+        num = title_num.group(1)
+
+        # ✅ Match like "8. RECOMMENDATIONS"
+        if re.match(rf'^{num}\.\s+', line):
+            if title_text in line.lower():
+                return True
+
+        # ✅ Match like "8 RECOMMENDATIONS"
+        if re.match(rf'^{num}\s+', line):
+            if title_text in line.lower():
+                return True
+
+    return False
 
 
-# ✅ Extract section content (IMPROVED LOGIC)
 def extract_section(lines, title):
     content = []
     found = False
 
-    norm_title = normalize(title)
-
-    for i, line in enumerate(lines):
+    for i in range(len(lines)):
+        line = lines[i]
         clean = line.strip()
-        norm_line = normalize(clean)
 
-        # ✅ find section start (skip TOC)
+        # ✅ CORRECT START DETECTION
         if not found:
-            if norm_title in norm_line and "..." not in clean:
+            if is_heading_match(title, clean):
                 found = True
                 content.append(clean)
             continue
 
         lower = clean.lower()
 
-        # ✅ stop at next main section (but allow sub-sections)
+        # ✅ Stop at next main section ONLY
         if re.match(r'^\d+\.\s+[A-Za-z]', clean):
             break
 
-        # ✅ KEEP sub-sections like 8.1, 8.2 ✅
+        # ✅ KEEP sub-sections like 8.1
         if re.match(r'^\d+\.\d+', clean):
             content.append(clean)
             continue
 
-        # ✅ KEEP bullet points ✅
-        if re.match(r'^\d+\.', clean):
+        # ✅ KEEP bullet points (1., 2., etc.)
+        if re.match(r'^\d+\.\s+', clean):
             content.append(clean)
             continue
 
-        # ❌ REMOVE TABLE / GRID DATA
+        # ❌ REMOVE table noise
         if any(word in lower for word in [
-            "asset details", "policy on a page", "owner", "territory",
-            "railway", "data availability", "status", "reports"
+            "asset details", "policy on a page", "owner",
+            "territory", "railway", "data availability",
+            "status", "reports"
         ]):
             continue
 
-        # ❌ REMOVE FOOTER / HEADER
+        # ❌ REMOVE footer
         if any(word in lower for word in [
-            "assessment report", "final", "february", "page", "wkl"
+            "assessment report", "final", "february",
+            "page", "wkl"
         ]):
             continue
 
-        # ❌ REMOVE PURE CAPITAL SHORT NOISE
-        if len(clean.split()) < 3 and clean.isupper():
-            continue
-
-        # ✅ append valid text
+        # ✅ Keep remaining valid text
         content.append(clean)
 
     return format_output(content)
 
 
-# ✅ Clean formatting
 def format_output(lines):
     output = ""
     paragraph = ""

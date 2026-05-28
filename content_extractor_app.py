@@ -32,9 +32,13 @@ if uploaded_file:
         selected_sections = []
 
         # ✅ CORRECT LOOP (NO index unpacking)
-        for i, title in enumerate(unique_sections):
-            if st.checkbox(title, key=f"{title}_{i}"):
-                selected_sections.append(title)
+        
+	for i, title in enumerate(unique_sections):
+  	  if st.checkbox(title, key=f"{title}_{i}"):
+       		 selected_sections.append(title)
+
+	for title in selected_sections:
+  	  content = extract_section(lines, title)
 
         if st.button("🚀 Extract Selected Sections"):
 
