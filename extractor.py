@@ -2,6 +2,7 @@ import re
 from pypdf import PdfReader
 
 
+# ✅ Extract text lines from PDF
 def extract_lines(file):
     reader = PdfReader(file)
     lines = []
@@ -10,121 +11,142 @@ def extract_lines(file):
         text = page.extract_text()
         if text:
             for line in text.split("\n"):
-                line = line.strip()
-                if line:
-                    lines.append(line)
+                clean = line.strip()
+                if clean:
+                    lines.append(clean)
 
     return lines
 
 
+# ✅ Detect TOC sections
 def detect_sections(lines):
     sections = []
     in_toc = False
 
     for line in lines:
-        clean = line.strip().lower()
+        lower = line.strip().lower()
 
-        if "table of contents" in clean:
+        if "table of contents" in lower:
             in_toc = True
             continue
 
-        if in_toc and "appendices" in clean:
+        if in_toc and "appendices" in lower:
             break
 
         if in_toc:
             if re.match(r'^\d+\.\s+[A-Za-z]', line):
+
+                # skip sub-sections
                 if re.match(r'^\d+\.\d+', line):
                     continue
 
-                clean_line = re.sub(r'\.+\s*\d+$', '', line.strip())
-                sections.append(clean_line)
+                clean = re.sub(r'\.+\s*\d+$', '', line.strip())
+                sections.append(clean)
 
     return sections
 
 
-def is_heading_line(line, title):
-    title_num = re.match(r'^(\d+)', title)
-    if not title_num:
+# ✅ Simple heading match
+def is_heading(title, line):
+    num_match = re.match(r'^(\d+)', title)
+    if not num_match:
         return False
 
-    num = title_num.group(1)
+    num = num_match.group(1)
 
-    # matches "8." OR "8 "
     if re.match(rf'^{num}[\.\s]', line):
-        if title.lower().split('.', 1)[-1].strip() in line.lower():
+        if title.lower().split(".", 1)[-1].strip() in line.lower():
             return True
 
     return False
 
 
+# ✅ FINAL SECTION EXTRACTOR (STABLE VERSION)
 def extract_section(lines, title):
+
     content = []
-    start_index = None
+    found = False
 
-    # ✅ get section number (like 8 from "8. RECOMMENDATIONS")
-    match = re.match(r'^(\d+)', title)
-    if not match:
-        return ""
-
-    section_num = match.group(1)
-
-    # ✅ find last occurrence (skip TOC automatically)
     for i, line in enumerate(lines):
         clean = line.strip()
+        lower = clean.lower()
 
-        if re.match(rf'^{section_num}[\.\s]', clean):
-            if "..." not in clean:  # skip TOC
-                start_index = i
+        # ✅ Find section (skip TOC)
+        if not found:
+            if is_heading(title, clean):
 
-    if start_index is None:
-        return ""
+                # skip TOC version
+                if "..." in clean:
+                    continue
 
-    # ✅ extract content forward
-    for i in range(start_index, len(lines)):
-        line = lines[i].strip()
-        lower = line.lower()
+                # check next lines (avoid TOC)
+                next_block = " ".join(lines[i+1:i+5])
+                if "..." in next_block:
+                    continue
 
-        if i != start_index:
+                found = True
+                content.append(clean)
+                continue
+
+        # ✅ Once found → extract content
+        if found:
+
             # ✅ stop at next section
-            if re.match(r'^\d+\.\s+[A-Za-z]', line):
+            if re.match(r'^\d+\.\s+[A-Za-z]', clean):
                 break
 
-        # ❌ remove dotted TOC lines
-        if "..." in line:
-            continue
+            # ✅ keep sub-sections
+            if re.match(r'^\d+\.\d+', clean):
+                content.append(clean)
+                continue
 
-        # ❌ remove table content
-        if any(word in lower for word in [
-            "asset", "policy", "owner", "territory",
-            "railway", "status", "reports"
-        ]):
-            continue
+            # ✅ keep bullet points
+            if re.match(r'^\d+\.\s+', clean):
+                content.append(clean)
+                continue
 
-        # ❌ remove footer
-        if any(word in lower for word in [
-            "assessment report", "page", "february", "final"
-        ]):
-            continue
+            # ❌ remove dotted TOC garbage
+            if "...." in clean:
+                continue
 
-        content.append(line)
+            # ❌ remove table / structured content
+            if any(w in lower for w in [
+                "asset", "railway", "owner", "territory",
+                "status", "reports", "policy"
+            ]):
+                continue
+
+            # ❌ remove footer/meta
+            if any(w in lower for w in [
+                "version", "contract", "page", "february",
+                "report", "final"
+            ]):
+                continue
+
+            # ❌ remove pure numeric junk
+            if re.match(r'^\d+(\.\d+)?$', clean):
+                continue
+
+            content.append(clean)
 
     return format_output(content)
 
 
+# ✅ Clean formatting
 def format_output(lines):
-    text = ""
-    para = ""
+    result = ""
+    paragraph = ""
 
     for line in lines:
         if len(line.split()) <= 3:
-            if para:
-                text += para.strip() + "\n\n"
-                para = ""
-            text += line + "\n"
+            if paragraph:
+                result += paragraph.strip() + "\n\n"
+                paragraph = ""
+            result += line + "\n"
         else:
-            para += line + " "
+            paragraph += line + " "
 
-    if para:
-        text += para.strip()
+    if paragraph:
+        result += paragraph.strip()
 
-    return text.strip()
+    return result.strip()

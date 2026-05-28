@@ -11,8 +11,6 @@ st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 st.title("AI PDF Content Extractor")
 st.divider()
 
-st.write("📂 Upload PDF → select sections → preview → download.")
-
 uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
 
 if uploaded_file:
@@ -21,7 +19,6 @@ if uploaded_file:
         lines = extract_lines(uploaded_file)
 
     sections = detect_sections(lines)
-
     unique_sections = list(dict.fromkeys(sections))
 
     if unique_sections:
@@ -31,8 +28,7 @@ if uploaded_file:
         selected_sections = []
 
         for i, title in enumerate(unique_sections):
-            # ✅ FIX duplicate key issue
-            if st.checkbox(title, key=f"checkbox_{i}"):
+            if st.checkbox(title, key=f"chk_{i}"):
                 selected_sections.append(title)
 
         if st.button("🚀 Extract Selected Sections"):
@@ -49,33 +45,32 @@ if uploaded_file:
                     content = extract_section(lines, title)
 
                     st.markdown(f"### {title}")
-                    # ✅ UNIQUE key for each text area
                     st.text_area(
-                        f"Content {i}",
-                        content,
+                        label=f"Content {i}",
+                        value=content,
                         height=200,
-                        key=f"text_{i}"
+                        key=f"txt_{i}"
                     )
 
                     combined_text += f"{title}\n\n{content}\n\n"
 
                 doc = Document()
-                doc.add_heading("Extracted PDF Sections", level=1)
+                doc.add_heading("Extracted Sections", level=1)
                 doc.add_paragraph(combined_text)
 
-                temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-                doc.save(temp.name)
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+                doc.save(tmp.name)
 
-                zipf.write(temp.name, "extracted_sections.docx")
+                zipf.write(tmp.name, "sections.docx")
 
             st.success("✅ Extraction Completed!")
 
             st.download_button(
-                "⬇ Download Word File",
+                "⬇ Download",
                 zip_buffer.getvalue(),
-                file_name="sections.zip",
-                mime="application/zip"
+                "sections.zip",
+                "application/zip"
             )
 
     else:
-        st.warning("⚠ TOC not detected")
+        st.warning("⚠ Table of Contents not detected")
