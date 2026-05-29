@@ -4,7 +4,7 @@ import tempfile
 import zipfile
 import io
 
-from extractor import extract_document, detect_sections, extract_section
+from extractor import extract_document, detect_sections, locate_section_starts, extract_section
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
@@ -12,69 +12,101 @@ st.title("AI PDF Content Extractor")
 st.divider()
 
 st.write(
-    "Upload a PDF, select one or more main sections from the Table of Contents, "
-    "preview the extracted content, and download the results."
+    "Upload one or more PDFs, select main sections from the Table of Contents, "
+    "preview extracted content, and download the results."
 )
 
-uploaded_file = st.file_uploader("Upload PDF file", type=["pdf"])
+uploaded_files = st.file_uploader(
+    "Upload PDF file(s)",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
-if uploaded_file:
+if uploaded_files:
 
-    with st.spinner("Processing PDF..."):
-        doc = extract_document(uploaded_file)
+    all_results = []
 
-    sections = detect_sections(doc)
+    for file_index, uploaded_file in enumerate(uploaded_files):
+        st.markdown("---")
+        st.subheader(f"📄 {uploaded_file.name}")
 
-    if sections:
-        st.subheader("Select Sections")
+        with st.spinner(f"Processing {uploaded_file.name}..."):
+            doc = extract_document(uploaded_file)
+            toc_sections = detect_sections(doc)
+            located_sections = locate_section_starts(doc, toc_sections)
 
-        selected_sections = []
+        if located_sections:
+            st.markdown("**Select Sections**")
 
-        for i, sec in enumerate(sections):
-            label = sec["title"]
-            if st.checkbox(label, key=f"sec_{i}_{sec['num']}"):
-                selected_sections.append(sec)
+            selected_sections = []
 
-        if st.button("🚀 Extract Selected Sections"):
+            for sec_index, sec in enumerate(located_sections):
+                label = sec["title"]
+                if st.checkbox(
+                    label,
+                    key=f"sec_{file_index}_{sec_index}_{sec['num']}"
+                ):
+                    selected_sections.append(sec)
 
-            zip_buffer = io.BytesIO()
-            combined_text = ""
+            all_results.append({
+                "file_name": uploaded_file.name,
+                "doc": doc,
+                "located_sections": located_sections,
+                "selected_sections": selected_sections
+            })
+        else:
+            st.warning(
+                f"No valid Table of Contents sections were detected (or mapped to body headings) in {uploaded_file.name}."
+            )
 
-            st.subheader("Preview")
+    if st.button("🚀 Extract Selected Sections From All PDFs"):
 
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
+        zip_buffer = io.BytesIO()
 
-                for i, sec in enumerate(selected_sections):
-                    content = extract_section(doc, sec)
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
-                    st.markdown(f"### {sec['title']}")
+            for result_index, result in enumerate(all_results):
+                file_name = result["file_name"]
+                doc = result["doc"]
+                located_sections = result["located_sections"]
+                selected_sections = result["selected_sections"]
+
+                if not selected_sections:
+                    continue
+
+                st.markdown("---")
+                st.subheader(f"Preview — {file_name}")
+
+                combined_text = ""
+
+                for sec_index, sec in enumerate(selected_sections):
+                    content = extract_section(doc, located_sections, sec)
+
+                    st.markdown(f"### {sec['title']} ({file_name})")
                     st.text_area(
-                        label=f"Content {i}",
+                        label=f"Content_{result_index}_{sec_index}",
                         value=content,
-                        height=260,
-                        key=f"preview_{i}_{sec['num']}"
+                        height=280,
+                        key=f"preview_{result_index}_{sec_index}_{sec['num']}"
                     )
 
                     combined_text += f"{sec['title']}\n\n{content}\n\n"
 
-                # Create Word output
                 word_doc = Document()
-                word_doc.add_heading("Extracted PDF Sections", level=1)
+                word_doc.add_heading(f"Extracted PDF Sections - {file_name}", level=1)
                 word_doc.add_paragraph(combined_text)
 
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
                 word_doc.save(tmp.name)
 
-                zipf.write(tmp.name, "extracted_sections.docx")
+                output_name = file_name.rsplit(".", 1)[0] + "_sections.docx"
+                zipf.write(tmp.name, output_name)
 
-            st.success("Extraction completed.")
+        st.success("Extraction completed.")
 
-            st.download_button(
-                label="⬇ Download Word File",
-                data=zip_buffer.getvalue(),
-                file_name="sections.zip",
-                mime="application/zip"
-            )
-
-    else:
-        st.warning("No valid Table of Contents sections were detected in this PDF.")
+        st.download_button(
+            label="⬇ Download All Word Files (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name="all_extracted_sections.zip",
+            mime="application/zip"
+        )
