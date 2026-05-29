@@ -3,19 +3,22 @@ from pypdf import PdfReader
 
 
 # ---------------------------------------------------
-# Basic helpers
+# Utility helpers
 # ---------------------------------------------------
 
 def normalize_text(text: str) -> str:
+    """
+    Lowercase and remove non-alphanumeric chars for flexible comparison.
+    """
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
 def is_main_section_heading(line: str) -> bool:
     """
-    Matches:
+    Matches main headings like:
       1. INTRODUCTION
       6. RECOMMENDATIONS
-    But NOT:
+    but NOT:
       1.1 Scope of Work
       8.2 Maintenance Team
     """
@@ -27,7 +30,7 @@ def is_main_section_heading(line: str) -> bool:
 
 def is_subsection_heading(line: str) -> bool:
     """
-    Matches:
+    Matches subsection headings like:
       8.1 Assessment Team
       8.2 Maintenance Team
     """
@@ -36,10 +39,9 @@ def is_subsection_heading(line: str) -> bool:
 
 def is_numbered_bullet(line: str) -> bool:
     """
-    Matches numbered bullets like:
-      1. Replace...
-      2. Repair...
-    but avoids treating major headings as bullets
+    Matches numbered bullet lines like:
+      1. Repair...
+      2. Replace...
     """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
@@ -51,7 +53,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # Dotted TOC style junk
+    # Dotted leader lines (TOC style)
     if re.search(r"\.{4,}", line):
         return True
 
@@ -68,14 +70,14 @@ def looks_like_footer_or_noise(line: str) -> bool:
         "final",
         "wkl",
     ]
-
     if any(k in low for k in footer_keywords):
         return True
 
-    # isolated numeric junk
+    # Pure numeric noise like 9.73 / 30 / 0214
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
+    # Tiny metadata fragments
     if low in {"ch", "yds", "m"}:
         return True
 
@@ -98,6 +100,7 @@ def looks_like_table_noise(line: str) -> bool:
     if any(k in low for k in table_keywords):
         return True
 
+    # Simple heuristic for table-like lines
     parts = line.split()
     if len(parts) >= 6:
         short_count = sum(1 for p in parts if len(p) <= 3)
@@ -109,12 +112,12 @@ def looks_like_table_noise(line: str) -> bool:
 
 
 # ---------------------------------------------------
-# Document extraction
+# PDF reading
 # ---------------------------------------------------
 
 def extract_document(file):
     """
-    Returns:
+    Reads the PDF and returns:
     {
         "pages": [ [line1, line2, ...], ... ],
         "flat_lines": [ (page_index, line), ... ]
@@ -142,28 +145,28 @@ def extract_document(file):
     }
 
 
-# backward-compatible helper if needed
 def extract_lines(file):
     """
-    Kept only for compatibility.
-    Returns flat list of lines.
+    Backward-compatible helper.
+    Returns just the flat list of text lines.
     """
     doc = extract_document(file)
     return [line for _, line in doc["flat_lines"]]
 
 
 # ---------------------------------------------------
-# TOC parsing
+# TOC detection
 # ---------------------------------------------------
 
 def detect_sections(doc):
     """
-    Detect ONLY main sections from the TOC.
+    Detect ONLY main sections from the Table of Contents.
 
-    Returns:
+    Returns a list like:
     [
-      {"num": 1, "title": "1. SYNOPSIS", "toc_page": 0, "target_page": 1},
-      ...
+        {"num": 1, "title": "1. SYNOPSIS", "toc_page": 0, "target_page": 1},
+        {"num": 2, "title": "2. STRUCTURE INFORMATION", "toc_page": 0, "target_page": 5},
+        ...
     ]
     """
     pages = doc["pages"]
@@ -172,8 +175,9 @@ def detect_sections(doc):
     in_toc = False
     toc_started = False
 
-    # Example:
+    # Matches lines like:
     # 6. RECOMMENDATIONS................20
+    # 4. DETAILED EXAMINATION SUMMARY .... 12
     toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)\s*\.{2,}\s*(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
@@ -200,11 +204,11 @@ def detect_sections(doc):
 
             sec_num = m.group(1)
             sec_title = m.group(2).strip()
-            toc_target_page = int(m.group(3))
+            target_page = int(m.group(3))
 
             display_title = f"{sec_num}. {sec_title}"
 
-            # skip subsection-like entries just in case
+            # just in case, skip subsection-like titles
             if re.match(r"^\d+\.\d+", display_title):
                 continue
 
@@ -212,37 +216,58 @@ def detect_sections(doc):
                 "num": int(sec_num),
                 "title": display_title,
                 "toc_page": page_index,
-                "target_page": toc_target_page
+                "target_page": target_page,
             })
 
         if toc_started and not in_toc:
             break
 
-    # remove duplicates while preserving order
-    unique_sections = []
+    # Remove duplicates while preserving order
+    unique = []
     seen = set()
     for sec in sections:
         if sec["title"] not in seen:
             seen.add(sec["title"])
-            unique_sections.append(sec)
+            unique.append(sec)
 
-    return unique_sections
+    return unique
 
 
 # ---------------------------------------------------
-# Actual section finding
+# Actual body heading detection
 # ---------------------------------------------------
 
 def heading_matches_section(line: str, section: dict) -> bool:
     """
-    Match actual body heading for a TOC section.
+    Match a real body heading for the given section.
     Handles:
       8. RECOMMENDATIONS
       8 RECOMMENDATIONS
     """
     clean = line.strip()
-
-    # must start with section number
     num = section["num"]
 
-    if not re.match(rf"^{num}[\.\s]",
+    # Must start with the correct main section number
+    if not re.match(rf"^{num}[\.\s]", clean):
+        return False
+
+    # Compare heading text after the number
+    if "." in section["title"]:
+        expected_text = section["title"].split(".", 1)[1].strip()
+    else:
+        expected_text = section["title"].strip()
+
+    expected_norm = normalize_text(expected_text)
+
+    # Remove the leading section number from the candidate line
+    candidate = re.sub(rf"^{num}[\.\s]+", "", clean).strip()
+    candidate_norm = normalize_text(candidate)
+
+    if not candidate_norm:
+        return False
+
+    # Flexible overlap
+    return expected_norm in candidate_norm or candidate_norm in expected_norm
+
+
+def find_section_start(doc, section
