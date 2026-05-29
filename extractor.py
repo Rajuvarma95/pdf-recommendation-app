@@ -1,4 +1,3 @@
-
 import re
 from pypdf import PdfReader
 
@@ -245,3 +244,5 @@ def heading_matches_section(line: str, section: dict) -> bool:
 
     # must start with section number
     num = section["num"]
+
+    if not re.match(rf"^{num}[\.\s]",
