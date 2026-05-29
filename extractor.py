@@ -18,7 +18,8 @@ def is_main_section_heading(line: str) -> bool:
     Matches main headings like:
       1. INTRODUCTION
       6. RECOMMENDATIONS
-    but NOT:
+
+    But NOT:
       1.1 Scope of Work
       8.2 Maintenance Team
     """
@@ -42,6 +43,8 @@ def is_numbered_bullet(line: str) -> bool:
     Matches numbered bullet lines like:
       1. Repair...
       2. Replace...
+
+    but avoids treating major headings as bullets.
     """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
@@ -53,7 +56,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # Dotted leader lines (TOC style)
+    # Dotted TOC style junk
     if re.search(r"\.{4,}", line):
         return True
 
@@ -162,7 +165,7 @@ def detect_sections(doc):
     """
     Detect ONLY main sections from the Table of Contents.
 
-    Returns a list like:
+    Returns:
     [
         {"num": 1, "title": "1. SYNOPSIS", "toc_page": 0, "target_page": 1},
         {"num": 2, "title": "2. STRUCTURE INFORMATION", "toc_page": 0, "target_page": 5},
@@ -208,7 +211,7 @@ def detect_sections(doc):
 
             display_title = f"{sec_num}. {sec_title}"
 
-            # just in case, skip subsection-like titles
+            # skip subsection-like entries just in case
             if re.match(r"^\d+\.\d+", display_title):
                 continue
 
@@ -240,6 +243,7 @@ def detect_sections(doc):
 def heading_matches_section(line: str, section: dict) -> bool:
     """
     Match a real body heading for the given section.
+
     Handles:
       8. RECOMMENDATIONS
       8 RECOMMENDATIONS
@@ -270,4 +274,109 @@ def heading_matches_section(line: str, section: dict) -> bool:
     return expected_norm in candidate_norm or candidate_norm in expected_norm
 
 
-def find_section_start(doc, section
+def find_section_start(doc, section):
+    """
+    Find the actual section heading in the body, not the TOC.
+    Search starts after the TOC page.
+    """
+    flat_lines = doc["flat_lines"]
+    start_search_page = section.get("toc_page", 0) + 1
+
+    for idx, (page_index, line) in enumerate(flat_lines):
+        if page_index < start_search_page:
+            continue
+
+        clean = line.strip()
+
+        # Skip dotted TOC lines
+        if re.search(r"\.{4,}", clean):
+            continue
+
+        if heading_matches_section(clean, section):
+            return idx
+
+    return None
+
+
+# ---------------------------------------------------
+# Section extraction
+# ---------------------------------------------------
+
+def extract_section(doc, section):
+    """
+    Extract content from real section heading until the next main section.
+    Keeps subsection headings and numbered bullets.
+    Removes obvious footer/table noise.
+    """
+    flat_lines = doc["flat_lines"]
+    start_idx = find_section_start(doc, section)
+
+    if start_idx is None:
+        return ""
+
+    collected = []
+    current_num = section["num"]
+
+    for idx in range(start_idx, len(flat_lines)):
+        _, line = flat_lines[idx]
+        clean = line.strip()
+
+        if idx > start_idx:
+            if is_main_section_heading(clean):
+                next_num_match = re.match(r"^(\d+)\.", clean)
+                if next_num_match:
+                    next_num = int(next_num_match.group(1))
+                    if next_num != current_num:
+                        break
+
+        if looks_like_footer_or_noise(clean):
+            continue
+
+        if looks_like_table_noise(clean):
+            continue
+
+        collected.append(clean)
+
+    return format_output(collected)
+
+
+# ---------------------------------------------------
+# Output formatting
+# ---------------------------------------------------
+
+def format_output(lines):
+    """
+    Format extracted lines into readable paragraphs while preserving:
+    - main headings
+    - subsection headings
+    - numbered bullets
+    """
+    output = []
+    paragraph = []
+
+    def flush_paragraph():
+        nonlocal paragraph
+        if paragraph:
+            output.append(" ".join(paragraph).strip())
+            paragraph = []
+
+    for line in lines:
+        clean = line.strip()
+        if not clean:
+            continue
+
+        if is_main_section_heading(clean) or is_subsection_heading(clean):
+            flush_paragraph()
+            output.append(clean)
+            continue
+
+        if is_numbered_bullet(clean):
+            flush_paragraph()
+            output.append(clean)
+            continue
+
+        paragraph.append(clean)
+
+    flush_paragraph()
+
+    return "\n\n".join(output).strip()
