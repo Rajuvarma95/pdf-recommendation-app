@@ -4,7 +4,13 @@ import tempfile
 import zipfile
 import io
 
-from extractor import extract_document, detect_sections, locate_section_starts, extract_section
+from extractor import (
+    extract_document,
+    detect_sections,
+    locate_section_starts,
+    extract_section,
+    clean_for_word,
+)
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
@@ -77,24 +83,31 @@ if uploaded_files:
                 st.markdown("---")
                 st.subheader(f"Preview — {file_name}")
 
-                combined_text = ""
+                # Create one Word file per PDF
+                word_doc = Document()
+                word_doc.add_heading(f"Extracted PDF Sections - {file_name}", level=1)
 
                 for sec_index, sec in enumerate(selected_sections):
                     content = extract_section(doc, located_sections, sec)
+                    safe_content = clean_for_word(content)
 
                     st.markdown(f"### {sec['title']} ({file_name})")
                     st.text_area(
                         label=f"Content_{result_index}_{sec_index}",
-                        value=content,
+                        value=safe_content,
                         height=280,
                         key=f"preview_{result_index}_{sec_index}_{sec['num']}"
                     )
 
-                    combined_text += f"{sec['title']}\n\n{content}\n\n"
+                    word_doc.add_heading(sec["title"], level=2)
 
-                word_doc = Document()
-                word_doc.add_heading(f"Extracted PDF Sections - {file_name}", level=1)
-                word_doc.add_paragraph(combined_text)
+                    if safe_content:
+                        for para in safe_content.split("\n\n"):
+                            para = clean_for_word(para)
+                            if para.strip():
+                                word_doc.add_paragraph(para)
+                    else:
+                        word_doc.add_paragraph("[No content extracted]")
 
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
                 word_doc.save(tmp.name)
