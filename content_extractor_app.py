@@ -7,7 +7,6 @@ import io
 from extractor import (
     extract_document,
     detect_sections,
-    locate_section_starts,
     extract_section,
     clean_for_word,
 )
@@ -18,8 +17,7 @@ st.title("AI PDF Content Extractor")
 st.divider()
 
 st.write(
-    "Upload one or more PDFs, select main sections from the Table of Contents, "
-    "preview extracted content, and download the results."
+    "Upload one or more PDFs, select main sections, preview extracted content, and download the results."
 )
 
 uploaded_files = st.file_uploader(
@@ -38,15 +36,14 @@ if uploaded_files:
 
         with st.spinner(f"Processing {uploaded_file.name}..."):
             doc = extract_document(uploaded_file)
-            toc_sections = detect_sections(doc)
-            located_sections = locate_section_starts(doc, toc_sections)
+            detected_sections = detect_sections(doc)
 
-        if located_sections:
+        if detected_sections:
             st.markdown("**Select Sections**")
 
             selected_sections = []
 
-            for sec_index, sec in enumerate(located_sections):
+            for sec_index, sec in enumerate(detected_sections):
                 label = sec["title"]
                 if st.checkbox(
                     label,
@@ -57,12 +54,12 @@ if uploaded_files:
             all_results.append({
                 "file_name": uploaded_file.name,
                 "doc": doc,
-                "located_sections": located_sections,
+                "sections": detected_sections,
                 "selected_sections": selected_sections
             })
         else:
             st.warning(
-                f"No valid Table of Contents sections were detected (or mapped to body headings) in {uploaded_file.name}."
+                f"No valid sections were detected in {uploaded_file.name}."
             )
 
     if st.button("🚀 Extract Selected Sections From All PDFs"):
@@ -74,7 +71,7 @@ if uploaded_files:
             for result_index, result in enumerate(all_results):
                 file_name = result["file_name"]
                 doc = result["doc"]
-                located_sections = result["located_sections"]
+                sections = result["sections"]
                 selected_sections = result["selected_sections"]
 
                 if not selected_sections:
@@ -83,12 +80,11 @@ if uploaded_files:
                 st.markdown("---")
                 st.subheader(f"Preview — {file_name}")
 
-                # Create one Word file per PDF
                 word_doc = Document()
                 word_doc.add_heading(f"Extracted PDF Sections - {file_name}", level=1)
 
                 for sec_index, sec in enumerate(selected_sections):
-                    content = extract_section(doc, located_sections, sec)
+                    content = extract_section(doc, sections, sec)
                     safe_content = clean_for_word(content)
 
                     st.markdown(f"### {sec['title']} ({file_name})")

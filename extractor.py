@@ -25,34 +25,26 @@ def clean_for_word(text: str) -> str:
 
 def is_main_section_heading(line: str) -> bool:
     """
-    Main section examples:
+    Matches:
       1. INTRODUCTION
+      5. Conclusions and Recommendations
       6. RECOMMENDATIONS
-      7. APPENDICES
-    Not:
+    But not:
       6.1 Assessment Team
     """
     line = line.strip()
+
     if re.match(r"^\d+\.\d+", line):
         return False
+
     return re.match(r"^\d+\.\s+[A-Za-z]", line) is not None
 
 
 def is_subsection_heading(line: str) -> bool:
-    """
-    Examples:
-      6.1 Assessment Team
-      6.2 Maintenance Team
-    """
     return re.match(r"^\d+\.\d+\s+[A-Za-z]", line.strip()) is not None
 
 
 def is_numbered_bullet(line: str) -> bool:
-    """
-    Examples:
-      1. Replacement of existing repairs
-      2. Fully clean and repaint...
-    """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
 
@@ -63,7 +55,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -83,7 +74,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
-    # pure numeric junk
+    # pure numeric noise
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
@@ -109,7 +100,6 @@ def looks_like_table_noise(line: str) -> bool:
     if any(k in low for k in table_keywords):
         return True
 
-    # table/grid-ish line heuristic
     parts = line.split()
     if len(parts) >= 6:
         short_count = sum(1 for p in parts if len(p) <= 3)
@@ -118,6 +108,37 @@ def looks_like_table_noise(line: str) -> bool:
             return True
 
     return False
+
+
+def looks_like_body_heading_candidate(line: str) -> bool:
+    """
+    Fallback heading detection when TOC mapping fails.
+    Very important for Sample.pdf-type files.
+    """
+    clean = line.strip()
+
+    if not is_main_section_heading(clean):
+        return False
+
+    if re.search(r"\.{4,}", clean):
+        return False
+
+    # strip leading "5. "
+    text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
+
+    # avoid sentence-like headings
+    if text_part.endswith("."):
+        return False
+
+    word_count = len(text_part.split())
+    if word_count > 10:
+        return False
+
+    # reject lines that look like body sentences
+    if text_part and text_part[0].islower():
+        return False
+
+    return True
 
 
 # ---------------------------------------------------
@@ -159,14 +180,9 @@ def extract_document(file):
 # TOC detection
 # ---------------------------------------------------
 
-def detect_sections(doc):
+def detect_toc_sections(doc):
     """
-    Detect ONLY main sections from the TOC.
-    Returns a list like:
-    [
-      {"num": 1, "title": "1. SYNOPSIS", "toc_page": 0, "target_page": 1},
-      ...
-    ]
+    Detect main sections from TOC only.
     """
     pages = doc["pages"]
     sections = []
@@ -174,8 +190,6 @@ def detect_sections(doc):
     in_toc = False
     toc_started = False
 
-    # Example:
-    # 6. RECOMMENDATIONS................20
     toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)\s*\.{2,}\s*(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
@@ -191,7 +205,6 @@ def detect_sections(doc):
             if not in_toc:
                 continue
 
-            # stop TOC once appendices section starts
             if "appendices" in low or low.startswith("appendix"):
                 in_toc = False
                 break
@@ -206,7 +219,6 @@ def detect_sections(doc):
 
             display_title = f"{sec_num}. {sec_title}"
 
-            # skip subsection-like TOC entries
             if re.match(r"^\d+\.\d+", display_title):
                 continue
 
@@ -220,7 +232,7 @@ def detect_sections(doc):
         if toc_started and not in_toc:
             break
 
-    # remove duplicates while preserving order
+    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -232,27 +244,19 @@ def detect_sections(doc):
 
 
 # ---------------------------------------------------
-# Actual heading matching
+# Section heading matching
 # ---------------------------------------------------
 
 def heading_matches_section(line: str, section: dict) -> bool:
-    """
-    Match body headings like:
-      6. RECOMMENDATIONS
-      6 RECOMMENDATIONS
-    """
     clean = line.strip()
     num = section["num"]
 
-    # correct section number at start
     if not re.match(rf"^{num}[\.\s]", clean):
         return False
 
-    # reject subsection-like lines
     if re.match(r"^\d+\.\d+", clean):
         return False
 
-    # heading text comparison
     expected_text = section["title"].split(".", 1)[1].strip() if "." in section["title"] else section["title"]
     expected_norm = normalize_text(expected_text)
 
@@ -265,9 +269,9 @@ def heading_matches_section(line: str, section: dict) -> bool:
     return expected_norm in candidate_norm or candidate_norm in expected_norm
 
 
-def locate_section_starts(doc, sections):
+def locate_section_starts_from_toc(doc, sections):
     """
-    Locate the real body start line for each TOC section in order.
+    Map TOC sections to body headings.
     """
     flat_lines = doc["flat_lines"]
     located = []
@@ -287,7 +291,6 @@ def locate_section_starts(doc, sections):
             _, line = flat_lines[idx]
             clean = line.strip()
 
-            # skip dotted TOC lines
             if re.search(r"\.{4,}", clean):
                 continue
 
@@ -305,13 +308,79 @@ def locate_section_starts(doc, sections):
 
 
 # ---------------------------------------------------
+# Fallback: detect main headings from body
+# ---------------------------------------------------
+
+def detect_body_sections(doc):
+    """
+    Fallback when TOC detection/mapping fails.
+    Useful for Sample.pdf.
+    """
+    flat_lines = doc["flat_lines"]
+    sections = []
+
+    for idx, (page_index, line) in enumerate(flat_lines):
+        clean = line.strip()
+
+        if looks_like_footer_or_noise(clean):
+            continue
+        if looks_like_table_noise(clean):
+            continue
+
+        if looks_like_body_heading_candidate(clean):
+            num_match = re.match(r"^(\d+)\.", clean)
+            if not num_match:
+                continue
+
+            sec_num = int(num_match.group(1))
+            sections.append({
+                "num": sec_num,
+                "title": clean_for_word(clean),
+                "toc_page": -1,
+                "target_page": page_index + 1,
+                "start_idx": idx
+            })
+
+    # remove duplicates by title
+    unique = []
+    seen = set()
+    for sec in sections:
+        if sec["title"] not in seen:
+            seen.add(sec["title"])
+            unique.append(sec)
+
+    return unique
+
+
+# ---------------------------------------------------
+# Public section detection API
+# ---------------------------------------------------
+
+def detect_sections(doc):
+    """
+    Final section detection used by app.
+
+    Strategy:
+    1. Try TOC detection + body mapping
+    2. If that fails, fallback to body heading detection
+    """
+    toc_sections = detect_toc_sections(doc)
+    if toc_sections:
+        located = locate_section_starts_from_toc(doc, toc_sections)
+        if located:
+            return located
+
+    # fallback for files like Sample.pdf
+    return detect_body_sections(doc)
+
+
+# ---------------------------------------------------
 # Section extraction
 # ---------------------------------------------------
 
-def extract_section(doc, located_sections, section):
+def extract_section(doc, all_sections, section):
     """
-    Extract from this section's body start to the next located main section start.
-    Stops before APPENDICES / next main section.
+    Extract from this section start to the next section start.
     """
     if "start_idx" not in section:
         return ""
@@ -319,7 +388,7 @@ def extract_section(doc, located_sections, section):
     flat_lines = doc["flat_lines"]
 
     current_pos = None
-    for i, sec in enumerate(located_sections):
+    for i, sec in enumerate(all_sections):
         if sec["title"] == section["title"] and sec.get("start_idx") == section.get("start_idx"):
             current_pos = i
             break
@@ -329,8 +398,8 @@ def extract_section(doc, located_sections, section):
 
     start_idx = section["start_idx"]
 
-    if current_pos < len(located_sections) - 1:
-        end_idx = located_sections[current_pos + 1]["start_idx"]
+    if current_pos < len(all_sections) - 1:
+        end_idx = all_sections[current_pos + 1]["start_idx"]
     else:
         end_idx = len(flat_lines)
 
@@ -342,13 +411,6 @@ def extract_section(doc, located_sections, section):
         low = clean.lower()
 
         if idx > start_idx:
-            if re.match(r"^\d+\.\s+[A-Za-z]", clean):
-                line_num_match = re.match(r"^(\d+)\.", clean)
-                if line_num_match:
-                    line_num = int(line_num_match.group(1))
-                    if line_num != section["num"]:
-                        break
-
             if "appendices" in low or low.startswith("appendix"):
                 break
 
@@ -368,13 +430,6 @@ def extract_section(doc, located_sections, section):
 # ---------------------------------------------------
 
 def format_output(lines):
-    """
-    Preserve:
-    - main headings
-    - subsection headings
-    - numbered bullets
-    - paragraph text
-    """
     output = []
     paragraph = []
 
