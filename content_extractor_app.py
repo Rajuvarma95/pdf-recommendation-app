@@ -9,6 +9,10 @@ from extractor import (
     detect_sections,
     extract_section,
     clean_for_word,
+    is_main_section_heading,
+    is_subsection_heading,
+    is_plain_subheading,
+    is_numbered_bullet,
 )
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
@@ -17,7 +21,8 @@ st.title("AI PDF Content Extractor")
 st.divider()
 
 st.write(
-    "Upload one or more PDFs, select main sections, preview extracted content, and download the results."
+    "Upload one or more PDFs, select main sections, preview extracted content, "
+    "and download the results."
 )
 
 uploaded_files = st.file_uploader(
@@ -25,6 +30,34 @@ uploaded_files = st.file_uploader(
     type=["pdf"],
     accept_multiple_files=True
 )
+
+
+def render_preview_block(title: str, content: str):
+    """
+    Richer preview to preserve headings, subheadings and bullets visually.
+    """
+    st.markdown(f"### {title}")
+
+    if not content.strip():
+        st.info("No content extracted.")
+        return
+
+    for block in content.split("\n\n"):
+        line = block.strip()
+        if not line:
+            continue
+
+        if is_main_section_heading(line):
+            st.markdown(f"#### {line}")
+        elif is_subsection_heading(line):
+            st.markdown(f"**{line}**")
+        elif is_plain_subheading(line):
+            st.markdown(f"**{line}**")
+        elif is_numbered_bullet(line):
+            st.markdown(line)
+        else:
+            st.write(line)
+
 
 if uploaded_files:
 
@@ -87,20 +120,21 @@ if uploaded_files:
                     content = extract_section(doc, sections, sec)
                     safe_content = clean_for_word(content)
 
-                    st.markdown(f"### {sec['title']} ({file_name})")
-                    st.text_area(
-                        label=f"Content_{result_index}_{sec_index}",
-                        value=safe_content,
-                        height=280,
-                        key=f"preview_{result_index}_{sec_index}_{sec['num']}"
-                    )
+                    render_preview_block(f"{sec['title']} ({file_name})", safe_content)
 
                     word_doc.add_heading(sec["title"], level=2)
 
                     if safe_content:
                         for para in safe_content.split("\n\n"):
-                            para = clean_for_word(para)
-                            if para.strip():
+                            para = clean_for_word(para).strip()
+                            if not para:
+                                continue
+
+                            if is_main_section_heading(para):
+                                word_doc.add_heading(para, level=2)
+                            elif is_subsection_heading(para) or is_plain_subheading(para):
+                                word_doc.add_heading(para, level=3)
+                            else:
                                 word_doc.add_paragraph(para)
                     else:
                         word_doc.add_paragraph("[No content extracted]")

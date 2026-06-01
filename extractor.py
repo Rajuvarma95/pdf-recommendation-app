@@ -41,12 +41,68 @@ def is_main_section_heading(line: str) -> bool:
 
 
 def is_subsection_heading(line: str) -> bool:
+    """
+    Matches:
+      8.1 Assessment Team
+      8.2 Maintenance Team
+    """
     return re.match(r"^\d+\.\d+\s+[A-Za-z]", line.strip()) is not None
 
 
 def is_numbered_bullet(line: str) -> bool:
+    """
+    Matches:
+      1. Replacement of existing repairs
+      2. Fully clean and repaint...
+    But avoids treating major headings as bullets.
+    """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
+
+
+def is_plain_subheading(line: str) -> bool:
+    """
+    Detect plain subheadings like:
+      Further Assessment
+      Monitoring
+      Maintenance
+
+    Avoid sentences and noise.
+    """
+    clean = line.strip()
+
+    if not clean:
+        return False
+
+    if is_main_section_heading(clean) or is_subsection_heading(clean) or is_numbered_bullet(clean):
+        return False
+
+    if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
+        return False
+
+    # keep short heading-like lines only
+    words = clean.split()
+    if len(words) < 1 or len(words) > 4:
+        return False
+
+    # reject if contains many digits
+    if sum(ch.isdigit() for ch in clean) > 1:
+        return False
+
+    # reject if looks like appendix/caption/table no matter what
+    if looks_like_appendix_or_caption_start(clean):
+        return False
+    if looks_like_table_noise(clean):
+        return False
+    if looks_like_footer_or_noise(clean):
+        return False
+
+    # mostly alphabetic words
+    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\-'/]*", w))
+    if alpha_words < len(words):
+        return False
+
+    return True
 
 
 def looks_like_footer_or_noise(line: str) -> bool:
@@ -55,6 +111,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
+    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -110,10 +167,47 @@ def looks_like_table_noise(line: str) -> bool:
     return False
 
 
+def looks_like_appendix_or_caption_start(line: str) -> bool:
+    """
+    Detect appendix/caption blocks that should stop extraction.
+    Important for Sample.pdf after section 5.
+    """
+    clean = line.strip()
+    low = clean.lower()
+
+    if low.startswith("appendix") or low.startswith("appendices"):
+        return True
+
+    # A. Location Plan / B. Photographs
+    if re.match(r"^[A-Z]\.\s+[A-Za-z]", clean):
+        return True
+
+    if low.startswith("figure "):
+        return True
+    if low.startswith("photograph "):
+        return True
+    if low.startswith("table "):
+        return True
+
+    caption_keywords = [
+        "location plan",
+        "principal inspection report",
+        "general view",
+        "north west wing wall",
+        "south west wing wall",
+        "formed from the water seepage",
+        "spalled concrete",
+    ]
+    if any(k in low for k in caption_keywords):
+        return True
+
+    return False
+
+
 def looks_like_body_heading_candidate(line: str) -> bool:
     """
     Fallback heading detection when TOC mapping fails.
-    Very important for Sample.pdf-type files.
+    Useful for Sample.pdf.
     """
     clean = line.strip()
 
@@ -123,19 +217,14 @@ def looks_like_body_heading_candidate(line: str) -> bool:
     if re.search(r"\.{4,}", clean):
         return False
 
-    # strip leading "5. "
     text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
 
-    # avoid sentence-like headings
+    # Avoid sentence-like headings
     if text_part.endswith("."):
         return False
 
     word_count = len(text_part.split())
     if word_count > 10:
-        return False
-
-    # reject lines that look like body sentences
-    if text_part and text_part[0].islower():
         return False
 
     return True
@@ -190,6 +279,8 @@ def detect_toc_sections(doc):
     in_toc = False
     toc_started = False
 
+    # Example:
+    # 6. RECOMMENDATIONS................20
     toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)\s*\.{2,}\s*(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
@@ -271,7 +362,7 @@ def heading_matches_section(line: str, section: dict) -> bool:
 
 def locate_section_starts_from_toc(doc, sections):
     """
-    Map TOC sections to body headings.
+    Map TOC sections to body headings in order.
     """
     flat_lines = doc["flat_lines"]
     located = []
@@ -308,12 +399,12 @@ def locate_section_starts_from_toc(doc, sections):
 
 
 # ---------------------------------------------------
-# Fallback: detect main headings from body
+# Fallback: detect headings from body directly
 # ---------------------------------------------------
 
 def detect_body_sections(doc):
     """
-    Fallback when TOC detection/mapping fails.
+    Fallback when TOC detection / mapping fails.
     Useful for Sample.pdf.
     """
     flat_lines = doc["flat_lines"]
@@ -324,7 +415,11 @@ def detect_body_sections(doc):
 
         if looks_like_footer_or_noise(clean):
             continue
+
         if looks_like_table_noise(clean):
+            continue
+
+        if looks_like_appendix_or_caption_start(clean):
             continue
 
         if looks_like_body_heading_candidate(clean):
@@ -333,6 +428,7 @@ def detect_body_sections(doc):
                 continue
 
             sec_num = int(num_match.group(1))
+
             sections.append({
                 "num": sec_num,
                 "title": clean_for_word(clean),
@@ -341,7 +437,7 @@ def detect_body_sections(doc):
                 "start_idx": idx
             })
 
-    # remove duplicates by title
+    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -353,7 +449,7 @@ def detect_body_sections(doc):
 
 
 # ---------------------------------------------------
-# Public section detection API
+# Public detection API
 # ---------------------------------------------------
 
 def detect_sections(doc):
@@ -381,6 +477,7 @@ def detect_sections(doc):
 def extract_section(doc, all_sections, section):
     """
     Extract from this section start to the next section start.
+    Also stops before appendix/caption content.
     """
     if "start_idx" not in section:
         return ""
@@ -408,10 +505,10 @@ def extract_section(doc, all_sections, section):
     for idx in range(start_idx, end_idx):
         _, line = flat_lines[idx]
         clean = line.strip()
-        low = clean.lower()
 
         if idx > start_idx:
-            if "appendices" in low or low.startswith("appendix"):
+            # stop before appendix/caption blocks
+            if looks_like_appendix_or_caption_start(clean):
                 break
 
         if looks_like_footer_or_noise(clean):
@@ -430,6 +527,14 @@ def extract_section(doc, all_sections, section):
 # ---------------------------------------------------
 
 def format_output(lines):
+    """
+    Preserve:
+    - main headings
+    - subsection headings
+    - plain subheadings (e.g., Further Assessment)
+    - numbered bullets
+    - paragraph text
+    """
     output = []
     paragraph = []
 
@@ -446,7 +551,7 @@ def format_output(lines):
         if not clean:
             continue
 
-        if is_main_section_heading(clean) or is_subsection_heading(clean):
+        if is_main_section_heading(clean) or is_subsection_heading(clean) or is_plain_subheading(clean):
             flush_paragraph()
             output.append(clean)
             continue
