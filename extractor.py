@@ -2,12 +2,7 @@ import re
 from pypdf import PdfReader
 
 
-# ---------------------------------------------------
-# Helpers
-# ---------------------------------------------------
-
-def normalize_text(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+#.lower()).strip()# ---------------------------------------------------
 
 
 def clean_for_word(text: str) -> str:
@@ -33,8 +28,10 @@ def is_main_section_heading(line: str) -> bool:
       6.1 Assessment Team
     """
     line = line.strip()
+
     if re.match(r"^\d+\.\d+", line):
         return False
+
     return re.match(r"^\d+\.\s+[A-Za-z]", line) is not None
 
 
@@ -52,7 +49,7 @@ def is_numbered_bullet(line: str) -> bool:
     Matches:
       1. Replacement of existing repairs
       2. Fully clean and repaint...
-    But avoids treating major headings as bullets.
+    But avoids treating main headings as bullets.
     """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
@@ -80,6 +77,7 @@ def is_plain_subheading(line: str) -> bool:
     if len(words) < 1 or len(words) > 4:
         return False
 
+    # reject if contains many digits
     if sum(ch.isdigit() for ch in clean) > 1:
         return False
 
@@ -146,6 +144,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
+    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -165,6 +164,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
+    # pure numeric junk
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
@@ -245,8 +245,8 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
 
 def trim_line_before_noise(line: str) -> str:
     """
-    If valid content and caption/footer noise appear in the SAME extracted line,
-    trim the line at the first noise marker and keep the valid prefix.
+    If a valid sentence and caption/report/appended noise appear in the SAME extracted line,
+    trim from the first noise marker onward and keep the valid prefix.
     """
     if not line:
         return line
@@ -262,22 +262,39 @@ def trim_line_before_noise(line: str) -> str:
         " Appendix",
         " Appendices",
         " INTERNAL",
-        " \\\\",
         "\\\\",
     ]
 
-    trimmed = line
     cut_positions = []
 
     for marker in markers:
-        pos = trimmed.find(marker)
+        pos = line.find(marker)
         if pos > 0:
             cut_positions.append(pos)
 
     if cut_positions:
-        trimmed = trimmed[:min(cut_positions)].strip()
+        line = line[:min(cut_positions)].strip()
 
-    return trimmed
+    return line
+
+
+def clean_toc_title(line: str) -> str:
+    """
+    Convert TOC lines like:
+      5. Conclusions and Recommendations 8
+      5. Conclusions and Recommendations........8
+    into:
+      5. Conclusions and Recommendations
+    """
+    clean = line.strip()
+
+    # dotted leader version
+    clean = re.sub(r"\s*\.{2,}\s*\d+\s*$", "", clean)
+
+    # trailing page number version
+    clean = re.sub(r"\s+\d+\s*$", "", clean)
+
+    return clean.strip()
 
 
 def looks_like_body_heading_candidate(line: str) -> bool:
@@ -293,8 +310,13 @@ def looks_like_body_heading_candidate(line: str) -> bool:
     if re.search(r"\.{4,}", clean):
         return False
 
+    # reject trailing page-number style headings copied from TOC
+    if re.search(r"\s+\d+\s*$", clean):
+        return False
+
     text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
 
+    # avoid sentence-like headings
     if text_part.endswith("."):
         return False
 
@@ -347,6 +369,10 @@ def extract_document(file):
 def detect_toc_sections(doc):
     """
     Detect main sections from TOC only.
+
+    Supports both:
+      5. Conclusions and Recommendations 8
+      5. Conclusions and Recommendations........8
     """
     pages = doc["pages"]
     sections = []
@@ -354,7 +380,8 @@ def detect_toc_sections(doc):
     in_toc = False
     toc_started = False
 
-    toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)\s*\.{2,}\s*(\d+)\s*$")
+    # trailing page number, with or without dotted leaders
+    toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)(?:\s*\.{2,}\s*|\s+)(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
         for line in page_lines:
@@ -396,6 +423,7 @@ def detect_toc_sections(doc):
         if toc_started and not in_toc:
             break
 
+    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -411,7 +439,7 @@ def detect_toc_sections(doc):
 # ---------------------------------------------------
 
 def heading_matches_section(line: str, section: dict) -> bool:
-    clean = line.strip()
+    clean = clean_toc_title(line.strip())
     num = section["num"]
 
     if not re.match(rf"^{num}[\.\s]", clean):
@@ -452,7 +480,7 @@ def locate_section_starts_from_toc(doc, sections):
 
         for idx in range(search_from_idx, len(flat_lines)):
             _, line = flat_lines[idx]
-            clean = line.strip()
+            clean = clean_toc_title(line.strip())
 
             if re.search(r"\.{4,}", clean):
                 continue
@@ -483,7 +511,7 @@ def detect_body_sections(doc):
     sections = []
 
     for idx, (page_index, line) in enumerate(flat_lines):
-        clean = line.strip()
+        clean = clean_toc_title(line.strip())
 
         if looks_like_footer_or_noise(clean):
             continue
@@ -639,3 +667,8 @@ def format_output(lines):
     flush_paragraph()
 
     return "\n\n".join(output).strip()
+
+# Helpers
+# ---------------------------------------------------
+
+def normalize_text(text: str) -> str:

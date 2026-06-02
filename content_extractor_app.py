@@ -21,8 +21,7 @@ st.title("AI PDF Content Extractor")
 st.divider()
 
 st.write(
-    "Upload one or more PDFs, select main sections, preview extracted content, "
-    "and download the results."
+    "Upload one or more PDFs, select main sections, preview extracted content, and download the results."
 )
 
 uploaded_files = st.file_uploader(
@@ -153,3 +152,4 @@ if uploaded_files:
             file_name="all_extracted_sections.zip",
             mime="application/zip"
         )
+``
