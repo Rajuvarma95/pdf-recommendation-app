@@ -33,18 +33,16 @@ def is_main_section_heading(line: str) -> bool:
       6.1 Assessment Team
     """
     line = line.strip()
-
     if re.match(r"^\d+\.\d+", line):
         return False
-
     return re.match(r"^\d+\.\s+[A-Za-z]", line) is not None
 
 
 def is_subsection_heading(line: str) -> bool:
     """
     Matches:
-      8.1 Assessment Team
-      8.2 Maintenance Team
+      6.1 Assessment Team
+      6.2 Maintenance Team
     """
     return re.match(r"^\d+\.\d+\s+[A-Za-z]", line.strip()) is not None
 
@@ -66,8 +64,6 @@ def is_plain_subheading(line: str) -> bool:
       Further Assessment
       Monitoring
       Maintenance
-
-    Avoid sentences and noise.
     """
     clean = line.strip()
 
@@ -80,16 +76,17 @@ def is_plain_subheading(line: str) -> bool:
     if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
         return False
 
-    # keep short heading-like lines only
     words = clean.split()
     if len(words) < 1 or len(words) > 4:
         return False
 
-    # reject if contains many digits
     if sum(ch.isdigit() for ch in clean) > 1:
         return False
 
-    # reject if looks like appendix/caption/table no matter what
+    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\-'/]*", w))
+    if alpha_words < len(words):
+        return False
+
     if looks_like_appendix_or_caption_start(clean):
         return False
     if looks_like_table_noise(clean):
@@ -97,12 +94,50 @@ def is_plain_subheading(line: str) -> bool:
     if looks_like_footer_or_noise(clean):
         return False
 
-    # mostly alphabetic words
-    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\-'/]*", w))
-    if alpha_words < len(words):
-        return False
-
     return True
+
+
+def looks_like_date_footer(line: str) -> bool:
+    """
+    Catch lines like:
+      June 2016
+      Feb 2024
+    """
+    clean = line.strip().lower()
+    return re.match(
+        r"^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{4}$",
+        clean
+    ) is not None
+
+
+def looks_like_file_path_or_internal(line: str) -> bool:
+    """
+    Catch document footer/path lines like:
+      \\server\folder\...
+      C:\folder\...
+      INTERNAL
+    """
+    clean = line.strip()
+    low = clean.lower()
+
+    if low == "internal":
+        return True
+
+    if clean.startswith("\\") or clean.startswith("/"):
+        return True
+
+    if re.search(r"[A-Za-z]:\\", clean):
+        return True
+
+    if "\\" in clean and len(clean) > 10:
+        return True
+
+    if "/" in clean and len(clean) > 20 and (
+        "project" in low or "execution" in low or "structures" in low
+    ):
+        return True
+
+    return False
 
 
 def looks_like_footer_or_noise(line: str) -> bool:
@@ -111,7 +146,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -131,11 +165,16 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
-    # pure numeric noise
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
     if low in {"ch", "yds", "m"}:
+        return True
+
+    if looks_like_date_footer(line):
+        return True
+
+    if looks_like_file_path_or_internal(line):
         return True
 
     return False
@@ -204,6 +243,43 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
     return False
 
 
+def trim_line_before_noise(line: str) -> str:
+    """
+    If valid content and caption/footer noise appear in the SAME extracted line,
+    trim the line at the first noise marker and keep the valid prefix.
+    """
+    if not line:
+        return line
+
+    markers = [
+        " Atkins Newcastle Road Middle Bridge",
+        " Principal Inspection Report",
+        " Figure ",
+        " Photograph ",
+        " A. Location Plan",
+        " B. Photographs",
+        " C. Defect Drawings",
+        " Appendix",
+        " Appendices",
+        " INTERNAL",
+        " \\\\",
+        "\\\\",
+    ]
+
+    trimmed = line
+    cut_positions = []
+
+    for marker in markers:
+        pos = trimmed.find(marker)
+        if pos > 0:
+            cut_positions.append(pos)
+
+    if cut_positions:
+        trimmed = trimmed[:min(cut_positions)].strip()
+
+    return trimmed
+
+
 def looks_like_body_heading_candidate(line: str) -> bool:
     """
     Fallback heading detection when TOC mapping fails.
@@ -219,7 +295,6 @@ def looks_like_body_heading_candidate(line: str) -> bool:
 
     text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
 
-    # Avoid sentence-like headings
     if text_part.endswith("."):
         return False
 
@@ -279,8 +354,6 @@ def detect_toc_sections(doc):
     in_toc = False
     toc_started = False
 
-    # Example:
-    # 6. RECOMMENDATIONS................20
     toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)\s*\.{2,}\s*(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
@@ -323,7 +396,6 @@ def detect_toc_sections(doc):
         if toc_started and not in_toc:
             break
 
-    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -437,7 +509,6 @@ def detect_body_sections(doc):
                 "start_idx": idx
             })
 
-    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -466,7 +537,6 @@ def detect_sections(doc):
         if located:
             return located
 
-    # fallback for files like Sample.pdf
     return detect_body_sections(doc)
 
 
@@ -507,7 +577,6 @@ def extract_section(doc, all_sections, section):
         clean = line.strip()
 
         if idx > start_idx:
-            # stop before appendix/caption blocks
             if looks_like_appendix_or_caption_start(clean):
                 break
 
@@ -517,7 +586,11 @@ def extract_section(doc, all_sections, section):
         if looks_like_table_noise(clean):
             continue
 
-        collected.append(clean_for_word(clean))
+        trimmed = trim_line_before_noise(clean)
+        if not trimmed:
+            break
+
+        collected.append(clean_for_word(trimmed))
 
     return format_output(collected)
 
@@ -531,7 +604,7 @@ def format_output(lines):
     Preserve:
     - main headings
     - subsection headings
-    - plain subheadings (e.g., Further Assessment)
+    - plain subheadings
     - numbered bullets
     - paragraph text
     """
