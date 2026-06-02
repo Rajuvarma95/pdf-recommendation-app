@@ -2,7 +2,12 @@ import re
 from pypdf import PdfReader
 
 
-#.lower()).strip()# ---------------------------------------------------
+# ---------------------------------------------------
+# Helpers
+# ---------------------------------------------------
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
 def clean_for_word(text: str) -> str:
@@ -16,6 +21,20 @@ def clean_for_word(text: str) -> str:
         ch for ch in text
         if ch == "\t" or ch == "\n" or ch == "\r" or ord(ch) >= 32
     )
+
+
+def clean_toc_title(line: str) -> str:
+    """
+    Convert TOC lines like:
+      5. Conclusions and Recommendations 8
+      5. Conclusions and Recommendations........8
+    into:
+      5. Conclusions and Recommendations
+    """
+    clean = line.strip()
+    clean = re.sub(r"\s*\.{2,}\s*\d+\s*$", "", clean)
+    clean = re.sub(r"\s+\d+\s*$", "", clean)
+    return clean.strip()
 
 
 def is_main_section_heading(line: str) -> bool:
@@ -77,11 +96,10 @@ def is_plain_subheading(line: str) -> bool:
     if len(words) < 1 or len(words) > 4:
         return False
 
-    # reject if contains many digits
     if sum(ch.isdigit() for ch in clean) > 1:
         return False
 
-    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\-'/]*", w))
+    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\\-'/]*", w))
     if alpha_words < len(words):
         return False
 
@@ -96,11 +114,6 @@ def is_plain_subheading(line: str) -> bool:
 
 
 def looks_like_date_footer(line: str) -> bool:
-    """
-    Catch lines like:
-      June 2016
-      Feb 2024
-    """
     clean = line.strip().lower()
     return re.match(
         r"^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{4}$",
@@ -109,12 +122,6 @@ def looks_like_date_footer(line: str) -> bool:
 
 
 def looks_like_file_path_or_internal(line: str) -> bool:
-    """
-    Catch document footer/path lines like:
-      \\server\folder\...
-      C:\folder\...
-      INTERNAL
-    """
     clean = line.strip()
     low = clean.lower()
 
@@ -144,7 +151,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -164,7 +170,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
-    # pure numeric junk
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
@@ -209,7 +214,6 @@ def looks_like_table_noise(line: str) -> bool:
 def looks_like_appendix_or_caption_start(line: str) -> bool:
     """
     Detect appendix/caption blocks that should stop extraction.
-    Important for Sample.pdf after section 5.
     """
     clean = line.strip()
     low = clean.lower()
@@ -245,8 +249,8 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
 
 def trim_line_before_noise(line: str) -> str:
     """
-    If a valid sentence and caption/report/appended noise appear in the SAME extracted line,
-    trim from the first noise marker onward and keep the valid prefix.
+    If valid sentence text and caption/report noise appear in the SAME line,
+    trim from the first noise marker onward.
     """
     if not line:
         return line
@@ -278,25 +282,6 @@ def trim_line_before_noise(line: str) -> str:
     return line
 
 
-def clean_toc_title(line: str) -> str:
-    """
-    Convert TOC lines like:
-      5. Conclusions and Recommendations 8
-      5. Conclusions and Recommendations........8
-    into:
-      5. Conclusions and Recommendations
-    """
-    clean = line.strip()
-
-    # dotted leader version
-    clean = re.sub(r"\s*\.{2,}\s*\d+\s*$", "", clean)
-
-    # trailing page number version
-    clean = re.sub(r"\s+\d+\s*$", "", clean)
-
-    return clean.strip()
-
-
 def looks_like_body_heading_candidate(line: str) -> bool:
     """
     Fallback heading detection when TOC mapping fails.
@@ -310,13 +295,12 @@ def looks_like_body_heading_candidate(line: str) -> bool:
     if re.search(r"\.{4,}", clean):
         return False
 
-    # reject trailing page-number style headings copied from TOC
+    # reject TOC-like trailing page number
     if re.search(r"\s+\d+\s*$", clean):
         return False
 
     text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
 
-    # avoid sentence-like headings
     if text_part.endswith("."):
         return False
 
@@ -369,8 +353,7 @@ def extract_document(file):
 def detect_toc_sections(doc):
     """
     Detect main sections from TOC only.
-
-    Supports both:
+    Supports:
       5. Conclusions and Recommendations 8
       5. Conclusions and Recommendations........8
     """
@@ -380,7 +363,6 @@ def detect_toc_sections(doc):
     in_toc = False
     toc_started = False
 
-    # trailing page number, with or without dotted leaders
     toc_line_re = re.compile(r"^(\d+)\.\s+(.+?)(?:\s*\.{2,}\s*|\s+)(\d+)\s*$")
 
     for page_index, page_lines in enumerate(pages):
@@ -413,6 +395,8 @@ def detect_toc_sections(doc):
             if re.match(r"^\d+\.\d+", display_title):
                 continue
 
+            display_title = clean_toc_title(display_title)
+
             sections.append({
                 "num": sec_num,
                 "title": clean_for_word(display_title),
@@ -423,7 +407,6 @@ def detect_toc_sections(doc):
         if toc_started and not in_toc:
             break
 
-    # remove duplicates
     unique = []
     seen = set()
     for sec in sections:
@@ -667,8 +650,3 @@ def format_output(lines):
     flush_paragraph()
 
     return "\n\n".join(output).strip()
-
-# Helpers
-# ---------------------------------------------------
-
-def normalize_text(text: str) -> str:
