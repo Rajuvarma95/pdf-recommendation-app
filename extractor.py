@@ -278,7 +278,6 @@ def is_plain_subheading(line: str) -> bool:
     if len(words) < 1 or len(words) > 4:
         return False
 
-    # reject if contains many digits
     if sum(ch.isdigit() for ch in clean) > 1:
         return False
 
@@ -665,4 +664,3 @@ def format_output(lines):
     flush_paragraph()
 
     return "\n\n".join(output).strip()
-``
