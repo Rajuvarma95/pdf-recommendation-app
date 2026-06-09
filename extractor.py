@@ -74,46 +74,12 @@ def is_numbered_bullet(line: str) -> bool:
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
 
 
-def is_plain_subheading(line: str) -> bool:
-    """
-    Detect plain subheadings like:
-      Further Assessment
-      Monitoring
-      Maintenance
-    """
-    clean = line.strip()
-
-    if not clean:
-        return False
-
-    if is_main_section_heading(clean) or is_subsection_heading(clean) or is_numbered_bullet(clean):
-        return False
-
-    if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
-        return False
-
-    words = clean.split()
-    if len(words) < 1 or len(words) > 4:
-        return False
-
-    if sum(ch.isdigit() for ch in clean) > 1:
-        return False
-
-    alpha_words = sum(1 for w in words if re.fullmatch(r"[A-Za-z][A-Za-z\\-'/]*", w))
-    if alpha_words < len(words):
-        return False
-
-    if looks_like_appendix_or_caption_start(clean):
-        return False
-    if looks_like_table_noise(clean):
-        return False
-    if looks_like_footer_or_noise(clean):
-        return False
-
-    return True
-
-
 def looks_like_date_footer(line: str) -> bool:
+    """
+    Catch lines like:
+      June 2016
+      Feb 2024
+    """
     clean = line.strip().lower()
     return re.match(
         r"^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{4}$",
@@ -122,6 +88,12 @@ def looks_like_date_footer(line: str) -> bool:
 
 
 def looks_like_file_path_or_internal(line: str) -> bool:
+    """
+    Catch document footer/path lines like:
+      \\server\folder\...
+      C:\folder\...
+      INTERNAL
+    """
     clean = line.strip()
     low = clean.lower()
 
@@ -151,6 +123,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
+    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -170,6 +143,7 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
+    # pure numeric junk
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
@@ -249,8 +223,8 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
 
 def trim_line_before_noise(line: str) -> str:
     """
-    If valid sentence text and caption/report noise appear in the SAME line,
-    trim from the first noise marker onward.
+    If valid sentence text and caption/report/appended noise appear in the SAME line,
+    trim from the first noise marker onward and keep the valid prefix.
     """
     if not line:
         return line
@@ -282,10 +256,52 @@ def trim_line_before_noise(line: str) -> str:
     return line
 
 
+def is_plain_subheading(line: str) -> bool:
+    """
+    Detect plain subheadings like:
+      Further Assessment
+      Monitoring
+      Maintenance
+    """
+    clean = line.strip()
+
+    if not clean:
+        return False
+
+    if is_main_section_heading(clean) or is_subsection_heading(clean) or is_numbered_bullet(clean):
+        return False
+
+    if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
+        return False
+
+    words = clean.split()
+    if len(words) < 1 or len(words) > 4:
+        return False
+
+    # reject if contains many digits
+    if sum(ch.isdigit() for ch in clean) > 1:
+        return False
+
+    alpha_words = sum(
+        1 for w in words
+        if re.fullmatch(r"[A-Za-z][A-Za-z'/-]*", w)
+    )
+    if alpha_words < len(words):
+        return False
+
+    if looks_like_appendix_or_caption_start(clean):
+        return False
+    if looks_like_table_noise(clean):
+        return False
+    if looks_like_footer_or_noise(clean):
+        return False
+
+    return True
+
+
 def looks_like_body_heading_candidate(line: str) -> bool:
     """
     Fallback heading detection when TOC mapping fails.
-    Useful for Sample.pdf.
     """
     clean = line.strip()
 
@@ -488,7 +504,6 @@ def locate_section_starts_from_toc(doc, sections):
 def detect_body_sections(doc):
     """
     Fallback when TOC detection / mapping fails.
-    Useful for Sample.pdf.
     """
     flat_lines = doc["flat_lines"]
     sections = []
@@ -650,3 +665,4 @@ def format_output(lines):
     flush_paragraph()
 
     return "\n\n".join(output).strip()
+``
