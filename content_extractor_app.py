@@ -4,16 +4,7 @@ import tempfile
 import zipfile
 import io
 
-from extractor import (
-    extract_document,
-    detect_sections,
-    extract_section,
-    clean_for_word,
-    is_main_section_heading,
-    is_subsection_heading,
-    is_plain_subheading,
-    is_numbered_bullet,
-)
+from extractor import extract_document, detect_sections, extract_section, clean_for_word, is_main_section_heading, is_subsection_heading, is_plain_subheading, is_numbered_bullet
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
@@ -102,53 +93,3 @@ if uploaded_files:
 
             for result_index, result in enumerate(all_results):
                 file_name = result["file_name"]
-                doc = result["doc"]
-                sections = result["sections"]
-                selected_sections = result["selected_sections"]
-
-                if not selected_sections:
-                    continue
-
-                st.markdown("---")
-                st.subheader(f"Preview — {file_name}")
-
-                word_doc = Document()
-                word_doc.add_heading(f"Extracted PDF Sections - {file_name}", level=1)
-
-                for sec_index, sec in enumerate(selected_sections):
-                    content = extract_section(doc, sections, sec)
-                    safe_content = clean_for_word(content)
-
-                    render_preview_block(f"{sec['title']} ({file_name})", safe_content)
-
-                    word_doc.add_heading(sec["title"], level=2)
-
-                    if safe_content:
-                        for para in safe_content.split("\n\n"):
-                            para = clean_for_word(para).strip()
-                            if not para:
-                                continue
-
-                            if is_main_section_heading(para):
-                                word_doc.add_heading(para, level=2)
-                            elif is_subsection_heading(para) or is_plain_subheading(para):
-                                word_doc.add_heading(para, level=3)
-                            else:
-                                word_doc.add_paragraph(para)
-                    else:
-                        word_doc.add_paragraph("[No content extracted]")
-
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-                word_doc.save(tmp.name)
-
-                output_name = file_name.rsplit(".", 1)[0] + "_sections.docx"
-                zipf.write(tmp.name, output_name)
-
-        st.success("Extraction completed.")
-
-        st.download_button(
-            label="⬇ Download All Word Files (ZIP)",
-            data=zip_buffer.getvalue(),
-            file_name="all_extracted_sections.zip",
-            mime="application/zip"
-        )
