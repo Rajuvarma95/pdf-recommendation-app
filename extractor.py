@@ -567,7 +567,7 @@ def detect_sections(doc):
 def extract_section(doc, all_sections, section):
     """
     Extract from this section start to the next section start.
-    Also handles cases where the first sentence is on the same line as the heading.
+    Handles heading+first sentence on the same line.
     """
     if "start_idx" not in section:
         return ""
@@ -591,7 +591,13 @@ def extract_section(doc, all_sections, section):
         end_idx = len(flat_lines)
 
     collected = []
-    section_title = section["title"]
+
+    # match heading line more flexibly
+    section_title = section["title"].strip()
+    heading_prefix_re = re.compile(
+        r"^(" + re.escape(section_title) + r")\s*(.*)$",
+        flags=re.IGNORECASE
+    )
 
     for idx in range(start_idx, end_idx):
         _, line = flat_lines[idx]
@@ -611,13 +617,15 @@ def extract_section(doc, all_sections, section):
         if not trimmed:
             break
 
-        # ✅ important fix:
-        # if heading line contains extra body text on same line,
-        # split it into heading + remainder
+        # ✅ key fix:
+        # if first line contains section heading + first sentence,
+        # split and keep both
         if idx == start_idx:
-            if trimmed.lower().startswith(section_title.lower()) and len(trimmed) > len(section_title):
-                remainder = trimmed[len(section_title):].strip(" :-")
-                collected.append(section_title)
+            m = heading_prefix_re.match(trimmed)
+            if m:
+                heading_text = m.group(1).strip()
+                remainder = m.group(2).strip(" :-")
+                collected.append(heading_text)
                 if remainder:
                     collected.append(remainder)
                 continue
@@ -634,12 +642,11 @@ def extract_section(doc, all_sections, section):
 def format_output(lines):
     """
     Preserve:
+    - heading
     - subsection headings
     - plain subheadings
     - numbered bullets
     - paragraph text
-
-    Avoid duplicating the main section heading in the extracted body.
     """
     output = []
     paragraph = []
@@ -657,12 +664,7 @@ def format_output(lines):
         if not clean:
             continue
 
-        # Skip the first main heading inside content to avoid duplicate preview heading
-        if i == 0 and is_main_section_heading(clean):
-            output.append(clean)
-            continue
-
-        if i > 0 and is_main_section_heading(clean):
+        if is_main_section_heading(clean):
             flush_paragraph()
             output.append(clean)
             continue
