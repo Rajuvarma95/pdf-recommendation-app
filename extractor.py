@@ -321,6 +321,57 @@ def looks_like_body_heading_candidate(line: str) -> bool:
     return True
 
 
+def is_continuation_start(text: str) -> bool:
+    """
+    Detect whether extracted first body line looks like it starts mid-sentence.
+    """
+    if not text:
+        return False
+
+    low = text.strip().lower()
+
+    continuation_words = (
+        "and ", "or ", "but ", "with ", "to ", "of ", "for ",
+        "in ", "on ", "at ", "from ", "by ", "during "
+    )
+
+    if low.startswith(continuation_words):
+        return True
+
+    # lower-case start often means continuation
+    if re.match(r"^[a-z]", text.strip()):
+        return True
+
+    return False
+
+
+def collect_lookback_prefix(flat_lines, start_idx, max_lookback=3):
+    """
+    Look back a few lines before heading if first body line starts as continuation.
+    Collect nearest valid non-heading, non-footer, non-table lines.
+    """
+    prefix_parts = []
+
+    for idx in range(max(0, start_idx - max_lookback), start_idx):
+        _, raw = flat_lines[idx]
+        line = normalize_extracted_line(raw)
+
+        if not line:
+            continue
+        if is_main_section_heading(line) or is_subsection_heading(line):
+            continue
+        if looks_like_footer_or_noise(line):
+            continue
+        if looks_like_table_noise(line):
+            continue
+        if looks_like_appendix_or_caption_start(line):
+            continue
+
+        prefix_parts.append(line)
+
+    return " ".join(prefix_parts).strip()
+
+
 # ---------------------------------------------------
 # PDF reading
 # ---------------------------------------------------
@@ -567,7 +618,8 @@ def detect_sections(doc):
 def extract_section(doc, all_sections, section):
     """
     Extract from this section start to the next section start.
-    Handles heading+first sentence on the same line.
+    If the first body line starts like a continuation, look back a few lines
+    before the heading and prepend valid text.
     """
     if "start_idx" not in section:
         return ""
@@ -592,7 +644,7 @@ def extract_section(doc, all_sections, section):
 
     collected = []
 
-    # match heading line more flexibly
+    # heading exact match helper
     section_title = section["title"].strip()
     heading_prefix_re = re.compile(
         r"^(" + re.escape(section_title) + r")\s*(.*)$",
@@ -603,9 +655,8 @@ def extract_section(doc, all_sections, section):
         _, line = flat_lines[idx]
         clean = normalize_extracted_line(line)
 
-        if idx > start_idx:
-            if looks_like_appendix_or_caption_start(clean):
-                break
+        if idx > start_idx and looks_like_appendix_or_caption_start(clean):
+            break
 
         if looks_like_footer_or_noise(clean):
             continue
@@ -617,9 +668,7 @@ def extract_section(doc, all_sections, section):
         if not trimmed:
             break
 
-        # ✅ key fix:
-        # if first line contains section heading + first sentence,
-        # split and keep both
+        # first line may contain heading + remainder
         if idx == start_idx:
             m = heading_prefix_re.match(trimmed)
             if m:
@@ -631,6 +680,20 @@ def extract_section(doc, all_sections, section):
                 continue
 
         collected.append(trimmed)
+
+    # ---------------------------------------------------
+    # LOOKBACK FIX:
+    # if first body line looks like continuation, prepend valid previous text
+    # ---------------------------------------------------
+    body_index = 1 if collected and is_main_section_heading(collected[0]) else 0
+
+    if len(collected) > body_index:
+        first_body = collected[body_index]
+
+        if is_continuation_start(first_body):
+            prefix = collect_lookback_prefix(flat_lines, start_idx, max_lookback=3)
+            if prefix:
+                collected[body_index] = f"{prefix} {first_body}".strip()
 
     return format_output(collected)
 
@@ -659,7 +722,7 @@ def format_output(lines):
                 output.append(clean_for_word(text))
             paragraph = []
 
-    for i, line in enumerate(lines):
+    for line in lines:
         clean = normalize_extracted_line(line)
         if not clean:
             continue
