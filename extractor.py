@@ -23,6 +23,22 @@ def clean_for_word(text: str) -> str:
     )
 
 
+def normalize_extracted_line(text: str) -> str:
+    """
+    Clean common PDF extraction artifacts.
+    """
+    if not text:
+        return ""
+
+    text = clean_for_word(text)
+    text = text.replace("¶", "")
+    text = text.replace("•", "")
+    text = text.replace("", "")
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def clean_toc_title(line: str) -> str:
     """
     Convert TOC lines like:
@@ -75,11 +91,6 @@ def is_numbered_bullet(line: str) -> bool:
 
 
 def looks_like_date_footer(line: str) -> bool:
-    """
-    Catch lines like:
-      June 2016
-      Feb 2024
-    """
     clean = line.strip().lower()
     return re.match(
         r"^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d{4}$",
@@ -88,12 +99,6 @@ def looks_like_date_footer(line: str) -> bool:
 
 
 def looks_like_file_path_or_internal(line: str) -> bool:
-    """
-    Catch document footer/path lines like:
-      \\server\folder\...
-      C:\folder\...
-      INTERNAL
-    """
     clean = line.strip()
     low = clean.lower()
 
@@ -123,7 +128,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if not low:
         return True
 
-    # dotted leader TOC lines
     if re.search(r"\.{4,}", line):
         return True
 
@@ -143,7 +147,6 @@ def looks_like_footer_or_noise(line: str) -> bool:
     if any(k in low for k in footer_keywords):
         return True
 
-    # pure numeric junk
     if re.fullmatch(r"\d+(\.\d+)?", low):
         return True
 
@@ -186,9 +189,6 @@ def looks_like_table_noise(line: str) -> bool:
 
 
 def looks_like_appendix_or_caption_start(line: str) -> bool:
-    """
-    Detect appendix/caption blocks that should stop extraction.
-    """
     clean = line.strip()
     low = clean.lower()
 
@@ -223,8 +223,7 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
 
 def trim_line_before_noise(line: str) -> str:
     """
-    If valid sentence text and caption/report/appended noise appear in the SAME line,
-    trim from the first noise marker onward and keep the valid prefix.
+    Trim valid line before obvious appendix/report/caption noise.
     """
     if not line:
         return line
@@ -299,9 +298,6 @@ def is_plain_subheading(line: str) -> bool:
 
 
 def looks_like_body_heading_candidate(line: str) -> bool:
-    """
-    Fallback heading detection when TOC mapping fails.
-    """
     clean = line.strip()
 
     if not is_main_section_heading(clean):
@@ -310,7 +306,6 @@ def looks_like_body_heading_candidate(line: str) -> bool:
     if re.search(r"\.{4,}", clean):
         return False
 
-    # reject TOC-like trailing page number
     if re.search(r"\s+\d+\s*$", clean):
         return False
 
@@ -349,7 +344,7 @@ def extract_document(file):
         for raw in text.split("\n"):
             clean = raw.strip()
             if clean:
-                clean = clean_for_word(clean)
+                clean = normalize_extracted_line(clean)
                 page_lines.append(clean)
                 flat_lines.append((page_index, clean))
 
@@ -572,7 +567,7 @@ def detect_sections(doc):
 def extract_section(doc, all_sections, section):
     """
     Extract from this section start to the next section start.
-    Also stops before appendix/caption content.
+    Also handles cases where the first sentence is on the same line as the heading.
     """
     if "start_idx" not in section:
         return ""
@@ -596,10 +591,11 @@ def extract_section(doc, all_sections, section):
         end_idx = len(flat_lines)
 
     collected = []
+    section_title = section["title"]
 
     for idx in range(start_idx, end_idx):
         _, line = flat_lines[idx]
-        clean = line.strip()
+        clean = normalize_extracted_line(line)
 
         if idx > start_idx:
             if looks_like_appendix_or_caption_start(clean):
@@ -615,7 +611,18 @@ def extract_section(doc, all_sections, section):
         if not trimmed:
             break
 
-        collected.append(clean_for_word(trimmed))
+        # ✅ important fix:
+        # if heading line contains extra body text on same line,
+        # split it into heading + remainder
+        if idx == start_idx:
+            if trimmed.lower().startswith(section_title.lower()) and len(trimmed) > len(section_title):
+                remainder = trimmed[len(section_title):].strip(" :-")
+                collected.append(section_title)
+                if remainder:
+                    collected.append(remainder)
+                continue
+
+        collected.append(trimmed)
 
     return format_output(collected)
 
@@ -627,11 +634,12 @@ def extract_section(doc, all_sections, section):
 def format_output(lines):
     """
     Preserve:
-    - main headings
     - subsection headings
     - plain subheadings
     - numbered bullets
     - paragraph text
+
+    Avoid duplicating the main section heading in the extracted body.
     """
     output = []
     paragraph = []
@@ -644,12 +652,22 @@ def format_output(lines):
                 output.append(clean_for_word(text))
             paragraph = []
 
-    for line in lines:
-        clean = clean_for_word(line.strip())
+    for i, line in enumerate(lines):
+        clean = normalize_extracted_line(line)
         if not clean:
             continue
 
-        if is_main_section_heading(clean) or is_subsection_heading(clean) or is_plain_subheading(clean):
+        # Skip the first main heading inside content to avoid duplicate preview heading
+        if i == 0 and is_main_section_heading(clean):
+            output.append(clean)
+            continue
+
+        if i > 0 and is_main_section_heading(clean):
+            flush_paragraph()
+            output.append(clean)
+            continue
+
+        if is_subsection_heading(clean) or is_plain_subheading(clean):
             flush_paragraph()
             output.append(clean)
             continue

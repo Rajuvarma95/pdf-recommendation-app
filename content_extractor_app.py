@@ -4,15 +4,24 @@ import tempfile
 import zipfile
 import io
 
-from extractor import extract_document, detect_sections, extract_section, clean_for_word, is_main_section_heading, is_subsection_heading, is_plain_subheading, is_numbered_bullet
+from extractor import (
+    extract_document,
+    detect_sections,
+    extract_section,
+    clean_for_word,
+    is_main_section_heading,
+    is_subsection_heading,
+    is_plain_subheading,
+    is_numbered_bullet,
+)
 
-st.set_page_config(page_title="AI PDF Content Extractor - DEBUG", layout="wide")
+st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
-st.title("AI PDF Content Extractor - DEBUG")
+st.title("AI PDF Content Extractor")
 st.divider()
 
 st.write(
-    "Upload one or more PDFs, select sections, run extraction, and inspect debug output."
+    "Upload one or more PDFs, select main sections, preview extracted content, and download the results."
 )
 
 uploaded_files = st.file_uploader(
@@ -24,7 +33,8 @@ uploaded_files = st.file_uploader(
 
 def render_preview_block(title: str, content: str):
     """
-    Richer preview to preserve headings, subheadings and bullets visually.
+    Preview with improved formatting.
+    Avoid duplicate heading display if content begins with the same heading.
     """
     st.markdown(f"### {title}")
 
@@ -32,11 +42,13 @@ def render_preview_block(title: str, content: str):
         st.warning("No content extracted for this section.")
         return
 
-    for block in content.split("\n\n"):
-        line = block.strip()
-        if not line:
-            continue
+    blocks = [b.strip() for b in content.split("\n\n") if b.strip()]
 
+    # remove duplicate first heading if same as card title
+    if blocks and blocks[0].lower() == title.lower():
+        blocks = blocks[1:]
+
+    for line in blocks:
         if is_main_section_heading(line):
             st.markdown(f"#### {line}")
         elif is_subsection_heading(line):
@@ -49,8 +61,8 @@ def render_preview_block(title: str, content: str):
             st.write(line)
 
 
-if "debug_results" not in st.session_state:
-    st.session_state["debug_results"] = None
+if "extracted_results" not in st.session_state:
+    st.session_state["extracted_results"] = None
 
 if uploaded_files:
 
@@ -64,15 +76,9 @@ if uploaded_files:
             doc = extract_document(uploaded_file)
             detected_sections = detect_sections(doc)
 
-        # DEBUG: show total extracted lines
-        st.caption(f"Total extracted lines: {len(doc['flat_lines'])}")
-
         if detected_sections:
-            st.markdown("**Detected Sections**")
-            for sec in detected_sections:
-                st.write(f"- {sec['title']}")
-
             st.markdown("**Select Sections**")
+
             selected_sections = []
 
             for sec_index, sec in enumerate(detected_sections):
@@ -83,7 +89,7 @@ if uploaded_files:
                 ):
                     selected_sections.append(sec)
 
-            st.caption(f"Selected sections count: {len(selected_sections)}")
+            st.caption(f"Selected sections: {len(selected_sections)}")
 
             all_results.append({
                 "file_name": uploaded_file.name,
@@ -92,7 +98,9 @@ if uploaded_files:
                 "selected_sections": selected_sections
             })
         else:
-            st.warning(f"No valid sections were detected in {uploaded_file.name}.")
+            st.warning(
+                f"No valid sections were detected in {uploaded_file.name}."
+            )
 
     if st.button("🚀 Extract Selected Sections From All PDFs"):
 
@@ -106,7 +114,7 @@ if uploaded_files:
 
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
 
-                for result_index, result in enumerate(all_results):
+                for result in all_results:
                     file_name = result["file_name"]
                     doc = result["doc"]
                     sections = result["sections"]
@@ -129,18 +137,19 @@ if uploaded_files:
 
                         file_result["items"].append({
                             "title": sec["title"],
-                            "content": safe_content,
-                            "raw_length": len(safe_content)
+                            "content": safe_content
                         })
 
                         word_doc.add_heading(sec["title"], level=2)
 
                         if safe_content:
-                            for para in safe_content.split("\n\n"):
-                                para = clean_for_word(para).strip()
-                                if not para:
-                                    continue
+                            parts = [p.strip() for p in safe_content.split("\n\n") if p.strip()]
 
+                            # avoid duplicate heading in Word if first paragraph == title
+                            if parts and parts[0].lower() == sec["title"].lower():
+                                parts = parts[1:]
+
+                            for para in parts:
                                 if is_main_section_heading(para):
                                     word_doc.add_heading(para, level=2)
                                 elif is_subsection_heading(para) or is_plain_subheading(para):
@@ -158,17 +167,17 @@ if uploaded_files:
 
                     extracted_payload.append(file_result)
 
-            st.session_state["debug_results"] = {
+            st.session_state["extracted_results"] = {
                 "payload": extracted_payload,
                 "zip_bytes": zip_buffer.getvalue()
             }
 
-# Always show debug results if available
-if st.session_state["debug_results"] is not None:
+# Always show results if extraction already happened
+if st.session_state["extracted_results"] is not None:
     st.markdown("---")
-    st.subheader("🔍 Debug Preview Results")
+    st.subheader("Preview")
 
-    payload = st.session_state["debug_results"]["payload"]
+    payload = st.session_state["extracted_results"]["payload"]
 
     if not payload:
         st.warning("No extracted results available.")
@@ -177,20 +186,11 @@ if st.session_state["debug_results"] is not None:
             st.markdown(f"## 📄 {file_result['file_name']}")
 
             for item in file_result["items"]:
-                st.markdown(f"### Section: {item['title']}")
-                st.write(f"**Extracted text length:** {item['raw_length']} characters")
-
-                with st.expander("Show raw extracted text"):
-                    if item["content"]:
-                        st.text(item["content"][:3000])
-                    else:
-                        st.write("[Empty content]")
-
                 render_preview_block(item["title"], item["content"])
 
     st.download_button(
         label="⬇ Download All Word Files (ZIP)",
-        data=st.session_state["debug_results"]["zip_bytes"],
+        data=st.session_state["extracted_results"]["zip_bytes"],
         file_name="all_extracted_sections.zip",
         mime="application/zip"
     )
