@@ -1,6 +1,6 @@
-import re
 import io
-from typing import List, Dict, Tuple
+import re
+from typing import Dict, List, Tuple
 
 from pypdf import PdfReader
 
@@ -28,13 +28,13 @@ def clean_for_word(text: str) -> str:
         return ""
     return "".join(
         ch for ch in text
-        if ch == "\t" or ch == "\n" or ch == "\r" or ord(ch) >= 32
+        if ch in ("\t", "\n", "\r") or ord(ch) >= 32
     )
 
 
 def normalize_extracted_line(text: str) -> str:
     """
-    Clean common PDF extraction artifacts without removing meaningful content.
+    Clean common PDF extraction artifacts without removing useful sentence content.
     """
     if not text:
         return ""
@@ -44,7 +44,6 @@ def normalize_extracted_line(text: str) -> str:
     text = text.replace("•", "")
     text = text.replace("", "")
     text = text.replace("\u00a0", " ")
-    text = text.replace("Réalis", "Réalis")  # keep as-is, placeholder for future normalization
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -73,10 +72,8 @@ def is_main_section_heading(line: str) -> bool:
       6.1 Assessment Team
     """
     line = line.strip()
-
     if re.match(r"^\d+\.\d+", line):
         return False
-
     return re.match(r"^\d+\.\s+[A-Za-z]", line) is not None
 
 
@@ -98,6 +95,47 @@ def is_numbered_bullet(line: str) -> bool:
     """
     line = line.strip()
     return re.match(r"^\d+\.\s+\S+", line) is not None and not is_main_section_heading(line)
+
+
+def is_plain_subheading(line: str) -> bool:
+    """
+    Detect plain subheadings like:
+      Further Assessment
+      Monitoring
+      Maintenance
+    """
+    clean = line.strip()
+    if not clean:
+        return False
+
+    if is_main_section_heading(clean) or is_subsection_heading(clean) or is_numbered_bullet(clean):
+        return False
+
+    if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
+        return False
+
+    words = clean.split()
+    if len(words) < 1 or len(words) > 4:
+        return False
+
+    if sum(ch.isdigit() for ch in clean) > 1:
+        return False
+
+    alpha_words = sum(
+        1 for w in words
+        if re.fullmatch(r"[A-Za-z][A-Za-z'/-]*", w)
+    )
+    if alpha_words < len(words):
+        return False
+
+    if looks_like_appendix_or_caption_start(clean):
+        return False
+    if looks_like_table_noise(clean):
+        return False
+    if looks_like_footer_or_noise(clean):
+        return False
+
+    return True
 
 
 def looks_like_date_footer(line: str) -> bool:
@@ -205,7 +243,6 @@ def looks_like_appendix_or_caption_start(line: str) -> bool:
     if low.startswith("appendix") or low.startswith("appendices"):
         return True
 
-    # A. Location Plan / B. Photographs
     if re.match(r"^[A-Z]\.\s+[A-Za-z]", clean):
         return True
 
@@ -253,7 +290,6 @@ def trim_line_before_noise(line: str) -> str:
     ]
 
     cut_positions = []
-
     for marker in markers:
         pos = line.find(marker)
         if pos > 0:
@@ -263,72 +299,6 @@ def trim_line_before_noise(line: str) -> str:
         line = line[:min(cut_positions)].strip()
 
     return line
-
-
-def is_plain_subheading(line: str) -> bool:
-    """
-    Detect plain subheadings like:
-      Further Assessment
-      Monitoring
-      Maintenance
-    """
-    clean = line.strip()
-
-    if not clean:
-        return False
-
-    if is_main_section_heading(clean) or is_subsection_heading(clean) or is_numbered_bullet(clean):
-        return False
-
-    if clean.endswith(".") or clean.endswith(":") or clean.endswith(";"):
-        return False
-
-    words = clean.split()
-    if len(words) < 1 or len(words) > 4:
-        return False
-
-    if sum(ch.isdigit() for ch in clean) > 1:
-        return False
-
-    alpha_words = sum(
-        1 for w in words
-        if re.fullmatch(r"[A-Za-z][A-Za-z'/-]*", w)
-    )
-    if alpha_words < len(words):
-        return False
-
-    if looks_like_appendix_or_caption_start(clean):
-        return False
-    if looks_like_table_noise(clean):
-        return False
-    if looks_like_footer_or_noise(clean):
-        return False
-
-    return True
-
-
-def looks_like_body_heading_candidate(line: str) -> bool:
-    clean = line.strip()
-
-    if not is_main_section_heading(clean):
-        return False
-
-    if re.search(r"\.{4,}", clean):
-        return False
-
-    if re.search(r"\s+\d+\s*$", clean):
-        return False
-
-    text_part = re.sub(r"^\d+\.\s+", "", clean).strip()
-
-    if text_part.endswith("."):
-        return False
-
-    word_count = len(text_part.split())
-    if word_count > 10:
-        return False
-
-    return True
 
 
 def is_continuation_start(text: str) -> bool:
@@ -354,12 +324,12 @@ def is_continuation_start(text: str) -> bool:
     return False
 
 
-def collect_lookback_prefix(flat_lines, start_idx, max_lookback=3):
+def collect_lookback_prefix(flat_lines: List[Tuple[int, str]], start_idx: int, max_lookback: int = 8) -> str:
     """
     Look back a few lines before heading if first body line starts as continuation.
     Collect nearest valid non-heading, non-footer, non-table lines.
     """
-    prefix_parts = []
+    prefix_parts: List[str] = []
 
     for idx in range(max(0, start_idx - max_lookback), start_idx):
         _, raw = flat_lines[idx]
@@ -393,9 +363,7 @@ def _group_words_into_lines(words: List[dict], y_tolerance: float = 3.0) -> List
     if not words:
         return []
 
-    # sort by top then x0
     words = sorted(words, key=lambda w: (round(w["top"], 1), w["x0"]))
-
     rows: List[List[dict]] = []
 
     for word in words:
@@ -408,7 +376,7 @@ def _group_words_into_lines(words: List[dict], y_tolerance: float = 3.0) -> List
         if not placed:
             rows.append([word])
 
-    lines = []
+    lines: List[str] = []
     for row in rows:
         row_sorted = sorted(row, key=lambda w: w["x0"])
         line_text = " ".join(w["text"] for w in row_sorted)
@@ -430,8 +398,8 @@ def _extract_document_with_pdfplumber(file) -> Dict:
     file_bytes = file.read()
     file_like = io.BytesIO(file_bytes)
 
-    pages = []
-    flat_lines = []
+    pages: List[List[str]] = []
+    flat_lines: List[Tuple[int, str]] = []
 
     with pdfplumber.open(file_like) as pdf:
         for page_index, page in enumerate(pdf.pages):
@@ -444,12 +412,10 @@ def _extract_document_with_pdfplumber(file) -> Dict:
                     split_at_punctuation=False,
                 )
             except TypeError:
-                # compatibility with older pdfplumber versions
                 words = page.extract_words()
 
             page_lines = _group_words_into_lines(words, y_tolerance=3.0)
 
-            # fallback if no words extracted
             if not page_lines:
                 raw_text = page.extract_text() or ""
                 for raw in raw_text.split("\n"):
@@ -473,12 +439,12 @@ def _extract_document_with_pypdf(file) -> Dict:
     """
     file.seek(0)
     reader = PdfReader(file)
-    pages = []
-    flat_lines = []
+    pages: List[List[str]] = []
+    flat_lines: List[Tuple[int, str]] = []
 
     for page_index, page in enumerate(reader.pages):
         text = page.extract_text() or ""
-        page_lines = []
+        page_lines: List[str] = []
 
         for raw in text.split("\n"):
             clean = normalize_extracted_line(raw)
@@ -509,7 +475,6 @@ def extract_document(file):
         try:
             return _extract_document_with_pdfplumber(file)
         except Exception:
-            # fallback safely
             return _extract_document_with_pypdf(file)
 
     return _extract_document_with_pypdf(file)
@@ -666,10 +631,8 @@ def detect_body_sections(doc):
 
         if looks_like_footer_or_noise(clean):
             continue
-
         if looks_like_table_noise(clean):
             continue
-
         if looks_like_appendix_or_caption_start(clean):
             continue
 
@@ -794,7 +757,7 @@ def extract_section(doc, all_sections, section):
         first_body = collected[body_index]
 
         if is_continuation_start(first_body):
-            prefix = collect_lookback_prefix(flat_lines, start_idx, max_lookback=3)
+            prefix = collect_lookback_prefix(flat_lines, start_idx, max_lookback=8)
             if prefix:
                 collected[body_index] = f"{prefix} {first_body}".strip()
 
