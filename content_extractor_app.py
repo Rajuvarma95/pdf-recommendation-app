@@ -4,16 +4,7 @@ import tempfile
 import zipfile
 import io
 
-from extractor import (
-    extract_document,
-    detect_sections,
-    extract_section,
-    clean_for_word,
-    is_main_section_heading,
-    is_subsection_heading,
-    is_plain_subheading,
-    is_numbered_bullet,
-)
+from extractor import extract_document, detect_sections, extract_section, clean_for_word, is_main_section_heading, is_subsection_heading, is_plain_subheading, is_numbered_bullet
 
 st.set_page_config(page_title="AI PDF Content Extractor", layout="wide")
 
@@ -32,10 +23,6 @@ uploaded_files = st.file_uploader(
 
 
 def render_preview_block(title: str, content: str):
-    """
-    Preview with improved formatting.
-    Avoid duplicate heading display if content begins with the same heading.
-    """
     st.markdown(f"### {title}")
 
     if not content.strip():
@@ -44,7 +31,6 @@ def render_preview_block(title: str, content: str):
 
     blocks = [b.strip() for b in content.split("\n\n") if b.strip()]
 
-    # remove duplicate first heading if same as card title
     if blocks and blocks[0].lower() == title.lower():
         blocks = blocks[1:]
 
@@ -65,7 +51,6 @@ if "extracted_results" not in st.session_state:
     st.session_state["extracted_results"] = None
 
 if uploaded_files:
-
     all_results = []
 
     for file_index, uploaded_file in enumerate(uploaded_files):
@@ -78,15 +63,11 @@ if uploaded_files:
 
         if detected_sections:
             st.markdown("**Select Sections**")
-
             selected_sections = []
 
             for sec_index, sec in enumerate(detected_sections):
                 label = sec["title"]
-                if st.checkbox(
-                    label,
-                    key=f"sec_{file_index}_{sec_index}_{sec['num']}"
-                ):
+                if st.checkbox(label, key=f"sec_{file_index}_{sec_index}_{sec['num']}"):
                     selected_sections.append(sec)
 
             st.caption(f"Selected sections: {len(selected_sections)}")
@@ -98,12 +79,9 @@ if uploaded_files:
                 "selected_sections": selected_sections
             })
         else:
-            st.warning(
-                f"No valid sections were detected in {uploaded_file.name}."
-            )
+            st.warning(f"No valid sections were detected in {uploaded_file.name}.")
 
     if st.button("🚀 Extract Selected Sections From All PDFs"):
-
         total_selected = sum(len(r["selected_sections"]) for r in all_results)
 
         if total_selected == 0:
@@ -113,7 +91,6 @@ if uploaded_files:
             zip_buffer = io.BytesIO()
 
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zipf:
-
                 for result in all_results:
                     file_name = result["file_name"]
                     doc = result["doc"]
@@ -145,7 +122,6 @@ if uploaded_files:
                         if safe_content:
                             parts = [p.strip() for p in safe_content.split("\n\n") if p.strip()]
 
-                            # avoid duplicate heading in Word if first paragraph == title
                             if parts and parts[0].lower() == sec["title"].lower():
                                 parts = parts[1:]
 
@@ -172,7 +148,6 @@ if uploaded_files:
                 "zip_bytes": zip_buffer.getvalue()
             }
 
-# Always show results if extraction already happened
 if st.session_state["extracted_results"] is not None:
     st.markdown("---")
     st.subheader("Preview")
@@ -184,7 +159,6 @@ if st.session_state["extracted_results"] is not None:
     else:
         for file_result in payload:
             st.markdown(f"## 📄 {file_result['file_name']}")
-
             for item in file_result["items"]:
                 render_preview_block(item["title"], item["content"])
 
