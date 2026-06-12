@@ -1,5 +1,14 @@
 import re
+import io
+from typing import List, Dict, Tuple
+
 from pypdf import PdfReader
+
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except Exception:
+    PDFPLUMBER_AVAILABLE = False
 
 
 # ---------------------------------------------------
@@ -25,7 +34,7 @@ def clean_for_word(text: str) -> str:
 
 def normalize_extracted_line(text: str) -> str:
     """
-    Clean common PDF extraction artifacts.
+    Clean common PDF extraction artifacts without removing meaningful content.
     """
     if not text:
         return ""
@@ -35,6 +44,7 @@ def normalize_extracted_line(text: str) -> str:
     text = text.replace("•", "")
     text = text.replace("", "")
     text = text.replace("\u00a0", " ")
+    text = text.replace("Réalis", "Réalis")  # keep as-is, placeholder for future normalization
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -338,7 +348,6 @@ def is_continuation_start(text: str) -> bool:
     if low.startswith(continuation_words):
         return True
 
-    # lower-case start often means continuation
     if re.match(r"^[a-z]", text.strip()):
         return True
 
@@ -373,17 +382,96 @@ def collect_lookback_prefix(flat_lines, start_idx, max_lookback=3):
 
 
 # ---------------------------------------------------
-# PDF reading
+# Layout-aware extraction (PdfPig-inspired, using pdfplumber)
 # ---------------------------------------------------
 
-def extract_document(file):
+def _group_words_into_lines(words: List[dict], y_tolerance: float = 3.0) -> List[str]:
     """
-    Returns:
-    {
-        "pages": [ [line1, line2, ...], ... ],
-        "flat_lines": [ (page_index, line), ... ]
+    Group words into lines by top coordinate and sort by x.
+    Inspired by PdfPig's word extraction + reading order concept.
+    """
+    if not words:
+        return []
+
+    # sort by top then x0
+    words = sorted(words, key=lambda w: (round(w["top"], 1), w["x0"]))
+
+    rows: List[List[dict]] = []
+
+    for word in words:
+        placed = False
+        for row in rows:
+            if abs(row[0]["top"] - word["top"]) <= y_tolerance:
+                row.append(word)
+                placed = True
+                break
+        if not placed:
+            rows.append([word])
+
+    lines = []
+    for row in rows:
+        row_sorted = sorted(row, key=lambda w: w["x0"])
+        line_text = " ".join(w["text"] for w in row_sorted)
+        line_text = normalize_extracted_line(line_text)
+        if line_text:
+            lines.append(line_text)
+
+    return lines
+
+
+def _extract_document_with_pdfplumber(file) -> Dict:
+    """
+    PdfPig-inspired extraction path:
+    - extract words
+    - group into lines
+    - preserve page reading order
+    """
+    file.seek(0)
+    file_bytes = file.read()
+    file_like = io.BytesIO(file_bytes)
+
+    pages = []
+    flat_lines = []
+
+    with pdfplumber.open(file_like) as pdf:
+        for page_index, page in enumerate(pdf.pages):
+            try:
+                words = page.extract_words(
+                    x_tolerance=2,
+                    y_tolerance=3,
+                    keep_blank_chars=False,
+                    use_text_flow=True,
+                    split_at_punctuation=False,
+                )
+            except TypeError:
+                # compatibility with older pdfplumber versions
+                words = page.extract_words()
+
+            page_lines = _group_words_into_lines(words, y_tolerance=3.0)
+
+            # fallback if no words extracted
+            if not page_lines:
+                raw_text = page.extract_text() or ""
+                for raw in raw_text.split("\n"):
+                    clean = normalize_extracted_line(raw)
+                    if clean:
+                        page_lines.append(clean)
+
+            pages.append(page_lines)
+            for line in page_lines:
+                flat_lines.append((page_index, line))
+
+    return {
+        "pages": pages,
+        "flat_lines": flat_lines,
     }
+
+
+def _extract_document_with_pypdf(file) -> Dict:
     """
+    Fallback extraction path using pypdf only.
+    """
+    file.seek(0)
     reader = PdfReader(file)
     pages = []
     flat_lines = []
@@ -393,9 +481,8 @@ def extract_document(file):
         page_lines = []
 
         for raw in text.split("\n"):
-            clean = raw.strip()
+            clean = normalize_extracted_line(raw)
             if clean:
-                clean = normalize_extracted_line(clean)
                 page_lines.append(clean)
                 flat_lines.append((page_index, clean))
 
@@ -405,6 +492,27 @@ def extract_document(file):
         "pages": pages,
         "flat_lines": flat_lines,
     }
+
+
+def extract_document(file):
+    """
+    Returns:
+    {
+        "pages": [ [line1, line2, ...], ... ],
+        "flat_lines": [ (page_index, line), ... ]
+    }
+
+    Uses pdfplumber first for improved layout-aware extraction,
+    falls back to pypdf if pdfplumber is unavailable.
+    """
+    if PDFPLUMBER_AVAILABLE:
+        try:
+            return _extract_document_with_pdfplumber(file)
+        except Exception:
+            # fallback safely
+            return _extract_document_with_pypdf(file)
+
+    return _extract_document_with_pypdf(file)
 
 
 # ---------------------------------------------------
@@ -644,7 +752,6 @@ def extract_section(doc, all_sections, section):
 
     collected = []
 
-    # heading exact match helper
     section_title = section["title"].strip()
     heading_prefix_re = re.compile(
         r"^(" + re.escape(section_title) + r")\s*(.*)$",
@@ -668,7 +775,6 @@ def extract_section(doc, all_sections, section):
         if not trimmed:
             break
 
-        # first line may contain heading + remainder
         if idx == start_idx:
             m = heading_prefix_re.match(trimmed)
             if m:
@@ -681,10 +787,7 @@ def extract_section(doc, all_sections, section):
 
         collected.append(trimmed)
 
-    # ---------------------------------------------------
-    # LOOKBACK FIX:
-    # if first body line looks like continuation, prepend valid previous text
-    # ---------------------------------------------------
+    # If first body line looks like a continuation, prepend previous nearby lines.
     body_index = 1 if collected and is_main_section_heading(collected[0]) else 0
 
     if len(collected) > body_index:
